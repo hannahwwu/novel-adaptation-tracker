@@ -68,7 +68,7 @@ function logoSvg(plat, size) {
       '</g><circle cx="12" cy="12" r="2.2" fill="#fbbf24"/>' +
       '</svg>';
   }
-  /* 总览：三色堆叠方块 */
+  /* 概览：三色堆叠方块 */
   return head +
     '<rect x="3" y="3" width="8" height="8" rx="2" fill="#ea580c"/>' +
     '<rect x="13" y="3" width="8" height="8" rx="2" fill="#2563eb"/>' +
@@ -79,8 +79,8 @@ function logoSvg(plat, size) {
 
 /* ---------------- 导航配置 ---------------- */
 var NAV = [
-  { key: 'overview', label: '总览', p: 'overview',
-    title: '总览驾驶舱', sub: '三平台横向对比' },
+  { key: 'overview', label: '概览', p: 'overview',
+    title: '概览', sub: '三平台头部与本期变化' },
   { key: 'fanqie_wwds', label: '番茄小说', p: 'fanqie',
     title: '番茄改编全库', sub: '全量' },
   { key: 'fanqie_hot', label: '番茄小说', p: 'fanqie',
@@ -157,12 +157,21 @@ function renderChrome() {
     line1.push('数据集 <b>7</b> 个');
     line1.push('最近更新 <b>' + esc(((DATA || {}).meta || {}).generated_at || '—') + '</b>');
   } else if (CUR === 'fanqie_wwds') {
-    line1.push('榜单数据 <b>' + esc(m.rank_date || '—') + '</b>');
-    line1.push('改编明细 <b>' + esc(m.detail_date || '—') + '</b>');
+    /* ⭐ 两个日期必须读 snap（每期各自的 xlsx 日期），不许读 m.rank_date/m.detail_date ——
+       page.meta 恒等于最新一期，切到 7 月快照时会一直显示 8-31。
+       这与下面 else 分支「榜单日随快照切换」是同一条规矩，2026-09-08 那次只修了
+       六个榜单页、漏了本页，2026-09-11 补上。读不到显「—」，绝不回退最新期。 */
+    line1.push('榜单数据 <b>' + esc((snap && snap.rank_date) || '—') + '</b>');
+    line1.push('改编明细 <b>' + esc((snap && snap.detail_date) || '—') + '</b>');
     line1.push('收录 <b>' + num(rowN) + '</b> 本');
   } else {
     /* 不再显示「在榜 N 本」—— 子标签上已经带了同一个数字，重复 */
-    line1.push('榜单日 <b>' + esc(m.board_date || '—') + '</b>');
+    /* ⭐ 榜单日随改编快照切换：每期各配「<= 该快照日的最近榜单日」
+       （后端 _bangdan_top_pei_dui）。⛔ 不要退回读 m.board_date —— 那是最新一期的
+       榜单日，切到 7 月快照时会显示 8-27，正是 2026-09-08 修掉的错配 bug。
+       读不到就显示「—」，宁可缺也不能显示错的日期。 */
+    var bangdanRi = snap ? snap.bangdan_ri : m.board_date;
+    line1.push('榜单日 <b>' + esc(bangdanRi || '—') + '</b>');
   }
 
   /* 元信息第二行：来源链接 + 已统计天数（参考 Dylan 站写法） */
@@ -247,9 +256,20 @@ function noteRowHtml(label, bodyHtml) {
   return '<div class="note-row"><span class="lb">' + esc(label) + '</span>' + bodyHtml + '</div>';
 }
 
-/* 「完整统计方式 ⓘ」浮窗。
-   纯 CSS 展开（hover / 键盘 focus / 点击后 focus 固定），不挂任何事件 ——
-   口径卡虽然不在局部刷新范围内，但少一处事件绑定就少一处踩 IME/重建的坑。 */
+/* 口径说明浮窗的外壳：页面上只露一个 ⓘ，hover / 键盘 focus / 点击后 focus 固定才展开。
+   纯 CSS 展开，不挂任何事件 —— 口径卡虽然不在局部刷新范围内，
+   但少一处事件绑定就少一处踩 IME/重建的坑。
+   ⚠ 用户 2026-09-07 明确要求：ⓘ 旁边不许再带「完整统计方式」这类文字，
+     全站所有口径说明类文案统一收进这个 ⓘ。要加提示文字请先问过用户。
+   innerHtml 由调用方自行 esc；ariaLabel 在这里 esc。 */
+function popKeHtml(innerHtml, ariaLabel) {
+  if (!innerHtml) return '';
+  return '<span class="pop" tabindex="0" role="button" aria-label="' +
+         esc(ariaLabel || '查看口径说明') + '">' +
+         '<b>ⓘ</b><span class="pop-bd">' + innerHtml + '</span></span>';
+}
+
+/* 统计方式·详情（长文）+ 可选阈值表 → 装进 ⓘ 浮窗 */
 function tongJiPopHtml(xiang, biao) {
   var inner = (xiang || []).map(function (p) {
     return '<p class="pop-p">' + esc(p) + '</p>';
@@ -264,17 +284,31 @@ function tongJiPopHtml(xiang, biao) {
       }).join('') + '</tbody></table>';
   }
   if (!inner) return '';
-  return '<span class="pop" tabindex="0" role="button" aria-label="查看完整统计方式">' +
-         '完整统计方式<b>ⓘ</b><span class="pop-bd">' + inner + '</span></span>';
+  return popKeHtml(inner, '查看完整统计方式');
 }
 
-function notesHtml(page) {
-  var n = page.notes || {};
+/* ⭐ 取「当前快照的口径说明」，读不到才回退 page 级。
+   番茄改编全库每期的分档阈值都不一样（实测 07-06 与 08-31 差 2~4%），
+   后端已把 notes 挂到每个快照上；其余六页没有 snap.notes，自动走 page.notes 原路。
+   ⛔ 别在调用点各写一遍 `page.notes || {}` —— notesHtml 有 3 个调用点，
+      分散写必漏（这个根因已犯三次：榜单日 / 页头日期 / 浮窗阈值）。统一走本函数。 */
+function pageNotes(page) {
+  page = page || {};
+  var snap = curSnap(page.key || CUR);      /* snapsOf(undefined) 返回 []，不会炸 */
+  return (snap && snap.notes) || page.notes || {};
+}
+
+/* 口径说明卡。
+   tongJiPopYiNuoZou = true 时，「统计方式」行只留摘要，详情浮窗不在这里出 ——
+   给番茄改编全库用：它的详情讲的是「改编超预期/不及预期」判定，
+   用户 2026-09-07 要求挪到「改编表现分布」指标卡上，见 renderWwds。 */
+function notesHtml(page, tongJiPopYiNuoZou) {
+  var n = pageNotes(page);
   var rows = '';
   if (n.source) rows += noteRowHtml('数据来源', esc(n.source));
   if (n.lei_xing) rows += noteRowHtml('改编类型枚举', esc(n.lei_xing));
-  /* 统计方式：摘要行内显示，长文与阈值表收进浮窗（用户 2026-09-04 明确要求） */
-  var pop = tongJiPopHtml(n.tong_ji_xiang, n.tong_ji_biao);
+  /* 统计方式：摘要行内显示，长文与阈值表收进 ⓘ 浮窗（用户 2026-09-04 明确要求） */
+  var pop = tongJiPopYiNuoZou ? '' : tongJiPopHtml(n.tong_ji_xiang, n.tong_ji_biao);
   if (n.tong_ji_zhai || pop) {
     rows += noteRowHtml('统计方式', esc(n.tong_ji_zhai || '') + (pop ? ' ' + pop : ''));
   }
@@ -290,22 +324,37 @@ function notesHtml(page) {
          '<span class="s">读数前请先看这里</span></div><div class="card-bd">' + rows + '</div></div>';
 }
 
+/* 洞察专栏。用户 2026-09-07 要求：给洞察结论一个单独显眼的地方，全站 8 页统一，
+   但**不要太大** —— 所以只加一条细标题带，条目本身反而比原来更紧凑。
+   注意别在这里挂事件，专栏会随局部刷新整块重建。 */
 function insightsHtml(list) {
   if (!list || !list.length) return '';
-  return '<div class="insights">' + list.map(function (i) {
-    return '<div class="insight ' + esc(i.level || 'normal') + '">' +
-           '<div class="t">' + esc(i.title) + '</div><div class="x">' + esc(i.text) + '</div></div>';
-  }).join('') + '</div>';
+  return '<div class="ins-zhuanlan">' +
+    '<div class="ins-hd">核心洞察<span class="ins-cnt">' + list.length + ' 条</span></div>' +
+    '<div class="insights">' + list.map(function (i) {
+      return '<div class="insight ' + esc(i.level || 'normal') + '">' +
+             '<div class="t">' + esc(i.title) + '</div><div class="x">' + esc(i.text) + '</div></div>';
+    }).join('') + '</div></div>';
 }
 
-function statCard(label, value, sub, subCls) {
-  return '<div class="stat"><div class="l">' + esc(label) + '</div>' +
+/* 指标卡。
+   labelHouZhui（可选）：紧跟在标题右边的 HTML，专门给 ⓘ 口径浮窗用。
+   ⚠ 它**不走 esc()**（否则浮窗 HTML 会被转义成纯文本），
+     只允许传本文件里生成的浮窗片段，绝不能直接塞外部数据。 */
+function statCard(label, value, sub, subCls, labelHouZhui) {
+  return '<div class="stat"><div class="l">' + esc(label) + (labelHouZhui || '') + '</div>' +
          '<div class="n">' + value + '</div>' +
          '<div class="s ' + (subCls || '') + '">' + (sub || '&nbsp;') + '</div></div>';
 }
 
-function cardHtml(title, subtitle, body) {
-  return '<div class="card" style="margin-bottom:16px"><div class="card-hd">' +
+/* 图表/内容卡片。
+   eWaiCls：可选的追加 class，用来给某几张卡开专属样式作用域
+   （目前只有番茄改编全库页的 4 张图传：折线图传 ka-quxian、柱状图传 ka-zhuzhuang）。
+   ⚠️ 必须 `(eWaiCls ? ... : '')` 兜底 —— 本函数有 10 个调用点，其中 6 个不传第 4 参，
+   直接拼会变成 class="card undefined"（`miniColsHtml` 加第 5 参时已经踩过一次）。 */
+function cardHtml(title, subtitle, body, eWaiCls) {
+  return '<div class="card' + (eWaiCls ? ' ' + eWaiCls : '') +
+         '" style="margin-bottom:16px"><div class="card-hd">' +
          '<span class="h">' + esc(title) + '</span>' +
          (subtitle ? '<span class="s">' + esc(subtitle) + '</span>' : '') +
          '</div><div class="card-bd">' + body + '</div></div>';
@@ -322,16 +371,29 @@ function barsHtml(rows, color, maxVal) {
 }
 
 /* 多系列折线图（内联 SVG，不引任何图表库）。
-   用于「改编作品上线月度趋势」——三条线（合计 / AI 漫剧 / 真人短剧）叠在一起，
+   用于「改编作品上线月度趋势」「热度天花板趋势」——多条线叠在一起，
    比原来那种「每月一根横条」更容易看出趋势与交叉点。
-   series = [{name, color, vals: [数值...]}]，labels = X 轴文字（与 vals 等长）。 */
-function lineChartHtml(labels, series) {
+   series = [{name, color, vals: [数值...]}]，labels = X 轴文字（与 vals 等长）。
+   danWei：tooltip 里的数值单位，默认「部」。热度天花板图要传「万」。
+
+   ⚠️ vals 里的 null 表示「该月样本不足、无可比数值」，与 0 完全不同：
+   补 0 会画出一条假的暴跌到底。null 的处理是断线 + 不画点 + tooltip 显示「样本不足」。 */
+function lineChartHtml(labels, series, danWei) {
   if (!labels || labels.length < 2 || !series || !series.length) return '';
-  var W = 720, H = 212, PL = 54, PR = 14, PT = 12, PB = 30;
+  var unit = danWei || '部';
+  /* viewBox 尺寸决定长宽比。用户 2026-09-07 要求「改成原来 1/4 大小」，
+     当时靠 viewBox 460×160 + CSS max-width:500px 实现。
+     2026-09-07 后续：本图改为与右侧「热度天花板」并列（各占半宽），
+     卡片本身已经只有半宽，max-width 已从 CSS 去掉 —— 再限死会让右侧又留白。
+     PL 从 54 缩到 40 —— 图变小后 Y 轴刻度文字也短了，留 54 会空一大块。 */
+  var W = 460, H = 160, PL = 40, PR = 10, PT = 10, PB = 24;
   var iw = W - PL - PR, ih = H - PT - PB;
+  /* 数值是否有效（null / undefined / NaN 都算无效，0 是有效值）。
+     不能写 if (v) —— 那会把真实的 0 也当成缺失。 */
+  var youXiao = function (v) { return v != null && !isNaN(v); };
   var maxV = 0;
   series.forEach(function (s) {
-    s.vals.forEach(function (v) { if (v > maxV) maxV = v; });
+    s.vals.forEach(function (v) { if (youXiao(v) && v > maxV) maxV = v; });
   });
   if (maxV <= 0) return '';
   /* Y 轴上界向上取整到「整」刻度，避免最大值顶格贴边 */
@@ -357,16 +419,45 @@ function lineChartHtml(labels, series) {
     g += '<text x="' + X(i).toFixed(1) + '" y="' + (H - 9) +
          '" text-anchor="middle" font-size="10" fill="var(--ink-3)">' + esc(lb) + '</text>';
   });
-  /* 折线 + 数据点（点上挂 title，鼠标悬停看具体数值） */
+  /* 折线 + 数据点。null 处断线：把连续的有效点切成若干段，各画一条 polyline。
+     不能整条 polyline 一把画 —— null 那一格会被跳过、两端直接连起来，
+     视觉上等于「凭空插值」，把「没数据」画成了「平稳过渡」。 */
   series.forEach(function (s) {
-    var pts = s.vals.map(function (v, i) { return X(i).toFixed(1) + ',' + Y(v).toFixed(1); });
-    g += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + s.color +
-         '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    var duan = [], cur = [];
     s.vals.forEach(function (v, i) {
-      g += '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(v).toFixed(1) +
-           '" r="2.6" fill="' + s.color + '"><title>' + esc(labels[i]) + ' · ' +
-           esc(s.name) + ' ' + num(v) + ' 部</title></circle>';
+      if (youXiao(v)) cur.push(X(i).toFixed(1) + ',' + Y(v).toFixed(1));
+      else { if (cur.length) duan.push(cur); cur = []; }
     });
+    if (cur.length) duan.push(cur);
+    duan.forEach(function (pts) {
+      if (pts.length < 2) return;     // 孤立单点没法画线，靠下面的圆点表达
+      g += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + s.color +
+           '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    });
+    s.vals.forEach(function (v, i) {
+      if (!youXiao(v)) return;        // 缺失月份不画点
+      g += '<circle class="dot" cx="' + X(i).toFixed(1) + '" cy="' + Y(v).toFixed(1) +
+           '" r="2.4" fill="' + s.color + '"/>';
+    });
+  });
+  /* 悬停命中区：每个月份一条透明竖条，覆盖全图高度。
+     原先把 <title> 挂在 r=2.6 的小圆点上，鼠标几乎命中不了（用户 2026-09-07 反馈
+     「悬停数据点看不了具体数值」）；图缩小后圆点更小，只会更难命中。
+     改成整列命中还顺带解决了另一个问题：多条线在后几个月几乎重合，
+     逐点命中时互相遮挡；整列一次给出所有系列的数值，比单点更有用。
+     必须放在折线之后，否则会被折线盖住。 */
+  var colW = iw / (labels.length - 1);
+  labels.forEach(function (lb, i) {
+    var x0 = Math.max(PL, X(i) - colW / 2);
+    var wCol = Math.min(W - PR, X(i) + colW / 2) - x0;
+    var tip = lb + '\n' + series.map(function (s) {
+      /* 缺失月份写明「样本不足」，不写 0 也不留空 ——
+         留空会让人以为是渲染 bug，写 0 会被当成真的跌到 0。 */
+      return s.name + ' ' + (youXiao(s.vals[i])
+        ? num(s.vals[i]) + ' ' + unit : '样本不足');
+    }).join('\n');
+    g += '<rect class="hit" x="' + x0.toFixed(1) + '" y="' + PT + '" width="' + wCol.toFixed(1) +
+         '" height="' + ih + '"><title>' + esc(tip) + '</title></rect>';
   });
 
   return '<svg viewBox="0 0 ' + W + ' ' + H + '" class="linechart" role="img">' + g + '</svg>' +
@@ -377,11 +468,13 @@ function lineChartHtml(labels, series) {
 
 /* 迷你竖向柱状图。用于「改编率随榜位分段」「改编形态分布」——
    这两处类目少、数值可比，竖柱比横向长条紧凑得多，也更像常规图表。
-   rows = [{k: 类目, v: 数值, t: 显示文本}]，maxVal 传 100 表示百分比刻度。 */
-function miniColsHtml(rows, color, maxVal, unit) {
+   rows = [{k: 类目, v: 数值, t: 显示文本}]，maxVal 传 100 表示百分比刻度。
+   eWaiCls：可选的追加 class（如 'mcols-xiao' 把柱子压低）。默认不传保持原样，
+   已有 4 处调用方一个字都不用改。 */
+function miniColsHtml(rows, color, maxVal, unit, eWaiCls) {
   if (!rows || !rows.length) return '';
   var max = maxVal || Math.max.apply(null, rows.map(function (r) { return r.v; }).concat([1]));
-  return '<div class="mcols">' + rows.map(function (r) {
+  return '<div class="mcols' + (eWaiCls ? ' ' + eWaiCls : '') + '">' + rows.map(function (r) {
     var pctH = Math.max(2, r.v / max * 100);      // 至少 2% 高度，避免 0 值完全看不见
     return '<div class="mcol" title="' + esc(r.k) + '：' + esc(r.t != null ? r.t : r.v) + '">' +
            '<div class="mcol-v">' + esc(r.t != null ? r.t : num(r.v)) + '</div>' +
@@ -677,19 +770,26 @@ function bookInfoHtml(r) {
 function renderFanqieBoard(page, snap) {
   var s = snap.stats || {}, m = page.meta || {}, parts = s.parts || {};
   var playlet = parts['短剧'] || 0, manju = parts['漫剧'] || 0, drama = playlet + manju;
-  var src = s.heat_src || {};
+  /* ⚠ 原先这里有 `var src = s.heat_src || {}`，供已删的「热度覆盖率」卡用。
+     卡在 2026-09-11 删掉后此变量无引用，已移除。
+     heat_src 本身仍在 ETL 侧计算，明细表（下方 d.heat_src）还要用来标「红果 / App」。 */
 
   var h = notesHtml(page);
 
-  /* 数据完整度提示：该快照没跑完 / 热度采集失效时明确告知，避免误读为「真的没有改编」 */
+  /* 告警框只留「本期数据异常」类（热度缺失），因为那是采集出了问题，
+     藏进 ⓘ 会被误读成「真的没有热度」。
+     而「X 本无对应记录」是分母口径说明，按用户 2026-09-07 要求收进「已改编书数」卡的 ⓘ。 */
   var warns = [];
   var covered = snap.covered != null ? snap.covered : s.book_total;
+  var weiCaiJiPop = '';
   if (covered < s.book_total) {
-    warns.push('本页书单固定为最新榜单日（' + esc(m.board_date || '—') + '）的 Top' +
-               num(s.book_total) + '。在 ' + esc(snap.date) + ' 这期改编数据中，其中 ' +
-               num(s.book_total - covered) + ' 本没有对应记录（可能当期尚未上榜，' +
-               '或该期采集未覆盖到），表中显示为 0，不代表其没有改编。' +
-               '改编率按该期有数据的 ' + num(covered) + ' 本计算。');
+    weiCaiJiPop = popKeHtml(
+      '<p class="pop-p">本快照配对的榜单日为 <b>' + esc(snap.bangdan_ri || '—') +
+      '</b>（取不晚于改编采集日 ' + esc(snap.date) + ' 的最近一期），共 Top' +
+      num(s.book_total) + '。其中 ' + num(s.book_total - covered) +
+      ' 本在该期改编数据里没有对应记录（多为该期采集未覆盖到），' +
+      '表中显示为 0，不代表其没有改编。改编率按该期有数据的 ' + num(covered) + ' 本计算。</p>',
+      '查看已改编书数与分母口径');
   }
   if (s.heat_total > 0 && s.heat_covered === 0) {
     warns.push('该快照日热度全部缺失（番茄 App 当期改版导致热度采集失效）。' +
@@ -707,15 +807,33 @@ function renderFanqieBoard(page, snap) {
   h += '<div class="stats">';
   h += statCard('已改编书数', num(s.adapted_books) + '<small> / ' + num(covered) + '</small>',
                 '改编率 ' + pct(s.adapted_books, covered) +
-                (covered < s.book_total ? '（按已采 ' + num(covered) + ' 本计）' : ''));
+                (covered < s.book_total ? '（按已采 ' + num(covered) + ' 本计）' : ''),
+                '', weiCaiJiPop);
+  /* Top10 改编率：用户 2026-09-11 指定放在「已改编书数」旁边，且口径与之一致
+     （任意改编 total>0 即算，不限短剧/漫剧）。ETL 侧按榜单 rank<=10 统计。 */
+  var t10 = s.top10_shu_shu || 0, t10Adapt = s.top10_yi_gaibian || 0;
+  h += statCard('Top10 作品改编率', pct(t10Adapt, t10),
+                'Top10 中 ' + num(t10Adapt) + ' / ' + num(t10) + ' 本已改编',
+                '', popKeHtml(
+                  '<p class="pop-p">分子＝榜单前 10 名里存在<b>任意类型</b>改编作品（短剧 / 漫剧 / 真人讲书等）的书数；' +
+                  '分母＝前 10 名实际在榜书数。与左侧「已改编书数」<b>同口径</b>，只是把范围缩到头部 10 本。</p>',
+                  '查看 Top10 改编率口径'));
   h += statCard('改编作品总数', num(s.parts_total),
                 Object.keys(parts).sort(function (a, b) { return parts[b] - parts[a]; })
                   .map(function (k) { return esc(k) + ' ' + parts[k]; }).join(' · '));
-  h += statCard('漫剧占影视化比例', pct(manju, drama),
-                '漫剧 ' + num(manju) + ' 部 / 短剧 ' + num(playlet) + ' 部');
-  h += statCard('热度覆盖率', pct(s.heat_covered, s.heat_total),
-                '短剧+漫剧 ' + num(s.heat_covered) + '/' + num(s.heat_total) +
-                ' · 红果 ' + num(src.ext || 0) + ' / App ' + num(src.ui || 0));
+  /* 平均改编作品数：用户 2026-09-11 定案 A1 —— 分母只算「有短剧或漫剧改编的书」，
+     不是全部在榜书，也不是全部已改编书（后者含只有真人讲书的书，会摊薄影视化深度）。
+     口径必须在前端可见（用户明确要求）。浮窗文案由用户 2026-09-11 亲自给定，改动前先问。 */
+  var youJu = s.you_duanju_manju_shu || 0;
+  h += statCard('平均改编作品数',
+                youJu ? (drama / youJu).toFixed(1) : '—',
+                '短剧+漫剧 ' + num(drama) + ' 部 / ' + num(youJu) + ' 本',
+                '', popKeHtml(
+                  '<p class="pop-p">只统计<b>短剧或漫剧</b>改编：分子＝短剧 ' + num(playlet) +
+                  ' 部 ＋ 漫剧 ' + num(manju) + ' 部 ＝ ' + num(drama) + ' 部。</p>' +
+                  '<p class="pop-p">分母＝<b>有短剧或漫剧改编的书</b>（' + num(youJu) +
+                  ' 本），不含只有真人讲书 / 有声等其他形态的书。</p>',
+                  '查看平均改编作品数口径'));
   h += '</div>';
 
   h += insightsHtml(snap.insights);
@@ -793,18 +911,40 @@ function renderWwds(page, snap) {
   /* 月度趋势：与 ETL 洞察同口径，只展示当月上线量达标的月份 */
   var monthly = (s.monthly || []).filter(function (x) { return (x.ai + x.real) >= 300; });
 
-  var h = notesHtml(page);
+  /* 统计方式·详情讲的是「改编超预期/不及预期」判定 + 各档阈值，
+     所以浮窗不放口径卡，挪到下面「改编表现分布」卡的标题右边（用户 2026-09-07 要求）。
+     第二个参数 true = 让口径卡的「统计方式」行只留摘要、不出 ⓘ，避免同一份说明出现两次。 */
+  /* ⭐ 走 pageNotes 取当期阈值表，不许直接读 page.notes（那是最新一期，切期不变） */
+  var wwdsNotes = pageNotes(page);
+  var biaoXianPop = tongJiPopHtml(wwdsNotes.tong_ji_xiang, wwdsNotes.tong_ji_biao);
+  var h = notesHtml(page, true);
 
   h += '<div class="stats">';
   h += statCard('已改编小说', num(t.books), '至少 1 部改编作品上线');
   h += statCard('改编作品总数', num(t.dramas), '平均每本 ' + (t.parts_per_book || 0) + ' 部');
   h += statCard('有 AI 漫剧的书', num(t.ai_books), '有真人短剧的书 ' + num(t.real_books) + ' 本');
+  /* 副标题带占比（用户 2026-09-11 要求）。
+     ⚠ 这三档是等频分位算出来的，占比天然近似恒定（实测三期环比全是 +1.4%）——
+       用户已知情并明确接受「就算占比一直不变也没关系」。不要再"优化"成环比。
+     分母用三档计数之和，不用 t.books —— 参与判定的书数（有热度）少于已改编书数，
+     用 t.books 会让三档占比加不到 100%。 */
+  var perfSum = (counts['超预期'] || 0) + (counts['符合预期'] || 0) + (counts['不及预期'] || 0);
   h += statCard('改编表现分布',
                 (counts['超预期'] || 0) + ' / ' + (counts['符合预期'] || 0) + ' / ' + (counts['不及预期'] || 0),
-                '超预期 / 符合 / 不及预期');
+                perfSum
+                  ? '超预期 ' + pct(counts['超预期'] || 0, perfSum) +
+                    ' / 符合预期 ' + pct(counts['符合预期'] || 0, perfSum) +
+                    ' / 不及预期 ' + pct(counts['不及预期'] || 0, perfSum)
+                  : '超预期 / 符合预期 / 不及预期',
+                '', biaoXianPop);
   h += '</div>';
 
   h += insightsHtml(snap.insights);
+
+  /* 上排两张趋势图左右并列（用户 2026-09-07 要求：右侧原来全空、留白太多）。
+     与下排「阈值图 × 题材效率图」共用 .grid2，四张图形成 2×2 网格、左右边界对齐。
+     两张都在才并列，只剩一张时整宽输出（并列会被 auto-fit 拉成半宽显得残缺）。 */
+  var quShiCharts = [];
 
   if (monthly.length >= 2) {
     /* 折线图：合计 / AI 漫剧 / 真人短剧 三条线。原先是「每月一根横条」，
@@ -817,9 +957,44 @@ function renderWwds(page, snap) {
         { name: 'AI 漫剧', color: '#7c3aed', vals: last12.map(function (x) { return x.ai; }) },
         { name: '真人短剧', color: '#ea580c', vals: last12.map(function (x) { return x.real; }) }
       ]);
-    h += cardHtml('改编作品上线月度趋势',
-                  '按上线月份统计当月新增作品数，纵轴为部数；鼠标悬停数据点看具体数值', body);
+    quShiCharts.push(cardHtml('改编作品上线月度趋势',
+                  '按上线月份统计当月新增作品数，纵轴为部数；鼠标悬停任一月份看三条线的具体数值',
+                  body, 'ka-quxian'));
   }
+
+  /* 热度天花板趋势：真人 vs AI 每月 top N 峰值热度均值，回答「改编剧能达到的
+     热度上限是否在逐月升高、谁更高」。X 轴与左图同样取最近 12 个月，两图对齐。
+     ⚠️ 副标题必须写明是「历史最高热度」口径：新上线的剧峰值可能还没爬到顶，
+     不写清楚会被问「8 月的剧才上线怎么就有峰值」。 */
+  var thb = (s.tianhuaban || []).filter(function (x) {
+    return x.ai_avg != null || x.real_avg != null;    // 两类都缺的月份直接不入图
+  }).slice(-12);
+  if (thb.length >= 2) {
+    var topN = s.tianhuaban_top_n || 10;
+    var minJu = s.tianhuaban_min_ju || 10;
+    /* 纵轴单位换成「万」，与页面其他热度展示一致（wan() 用的也是万）。
+       null 必须原样透传给 lineChartHtml 走断线逻辑，不许 || 0 —— 补 0 会画出假暴跌。 */
+    var toWan = function (v) { return v == null ? null : Math.round(v / 10000); };
+    var body3 = lineChartHtml(
+      thb.map(function (x) { return x.month; }),
+      [
+        { name: 'AI 漫剧', color: '#7c3aed', vals: thb.map(function (x) { return toWan(x.ai_avg); }) },
+        { name: '真人短剧', color: '#ea580c', vals: thb.map(function (x) { return toWan(x.real_avg); }) }
+      ], '万');
+    quShiCharts.push(cardHtml('改编剧热度天花板月度趋势',
+                  '按上线月份取该月峰值热度前 ' + topN + ' 部的均值，纵轴为热度（万）；' +
+                  '热度为红果历史最高热度（非当月值），当月该类型不足 ' + minJu + ' 部则断线不画',
+                  body3, 'ka-quxian'));
+  }
+
+  if (quShiCharts.length === 2) h += '<div class="grid2">' + quShiCharts.join('') + '</div>';
+  else h += quShiCharts.join('');
+
+  /* 阈值图与题材效率图左右并列（用户 2026-09-07 要求「都调小」）。
+     复用已有的 .grid2（另一处平台页 charts.length===2 也是这么并的），
+     窄屏时 auto-fit 会自动落回单列，不用额外写断点。
+     只有两张都在时才并列；单张时并列会拉成半宽显得残缺。 */
+  var wwdsCharts = [];
 
   if (bands.length) {
     /* 原先是一张 6 列阈值表，信息密但很丑。改成竖柱看各档中位热度，
@@ -829,16 +1004,23 @@ function renderWwds(page, snap) {
     var qLo = 'p' + Math.round((bands[0].under_q || 0.25) * 100);
     var body1 = miniColsHtml(bands.map(function (x) {
       return { k: '档 ' + x.band, v: x.heat_mid, t: wan(x.heat_mid) };
-    }), 'var(--fanqie)', null, '纵轴为该档「改编剧最高热度」中位数（万）');
-    body1 += '<div class="thresh-note">' + bands.map(function (x) {
-      return '<span><b>档 ' + x.band + '</b>　累计阅读 ' + num(x.cum_read_min) + '–' +
-             num(x.cum_read_max) + '　共 ' + num(x.books) + ' 本　超预期线（' + qHi + '） ' +
+    }), 'var(--fanqie)', null, '纵轴为该档「改编剧最高热度」中位数（万）', 'mcols-xiao');
+    body1 += '<div class="thresh-note">' + bands.map(function (x, i) {
+      /* 区间写成开/闭区间，不写「min–max」：用户 2026-09-07 指出
+         「档3（1,022,869–55,013,047）」会让听众误以为最高档之外还有书。
+         上界一律取「上一档的 cum_read_max」，而不是本档的 min —— 两者之间
+         有采样空隙（如 1,022,658 vs 1,022,869），用 min 会让区间对不上。 */
+      var qu = (i < bands.length - 1)
+        ? '≤ ' + num(x.cum_read_max)
+        : '> ' + num(bands[bands.length - 2].cum_read_max);
+      return '<span><b>档 ' + x.band + '</b>　累计阅读 ' + qu +
+             '　共 ' + num(x.books) + ' 本　超预期线（' + qHi + '） ' +
              wan(x.heat_over) + '　不及预期线（' + qLo + '） ' + wan(x.heat_under) + '</span>';
     }).join('') + '</div>';
-    h += cardHtml('改编表现判定阈值（按累计阅读分 ' + bands.length + ' 档）',
+    wwdsCharts.push(cardHtml('改编表现判定阈值（按累计阅读分 ' + bands.length + ' 档）',
                   '同档内比较：该书改编剧最高热度高于本档 ' + qHi + ' 记为超预期，低于 ' +
                   qLo + ' 记为不及预期，介于两者之间为符合预期',
-                  body1);
+                  body1, 'ka-zhuzhuang'));
   }
 
   var ce = s.cat_eff || [];
@@ -852,12 +1034,25 @@ function renderWwds(page, snap) {
     var body2 = miniColsHtml(ce.slice(0, 8).map(function (r) {
       return { k: r.category, v: r.over_pct, t: r.over_pct + '%' };
     }), 'var(--up)', null,
-       '纵轴为该题材中改编表现「超预期」的书占比（%），全局基准约 ' + base + '%');
-    h += cardHtml('题材改编效率（表现较好的题材）',
+       '纵轴为该题材中改编表现「超预期」的书占比（%），全局基准约 ' + base + '%',
+       'mcols-xiao');
+    /* 副标题必须说清分母：全库题材上百个，图上只画 8 个，
+       不写「从多少个里挑的」听众会以为只有这几个题材。数字从 stats 取，不写死。 */
+    var ceTotal = s.cat_eff_total || ce.length;
+    var ceBooks = s.cat_eff_books || 0;
+    var fenMu = '共 ' + ceTotal + ' 个题材参与排名';
+    if (ceBooks && s.totals && s.totals.books) {
+      fenMu += '，覆盖全库 ' + (ceBooks / s.totals.books * 100).toFixed(1) + '% 的书';
+    }
+    wwdsCharts.push(cardHtml('题材改编效率（表现较好的题材）',
                   '超预期 = 该书改编剧最高热度高于同体量档 p' + Math.round(overQ * 100) +
-                  '；仅统计样本 150 本以上的题材',
-                  body2);
+                  '；仅统计样本 150 本以上的题材，' + fenMu + '，图上按超预期占比取前 8',
+                  body2, 'ka-zhuzhuang'));
   }
+
+  /* 两张都在才并列；只剩一张时并列会被 auto-fit 拉成半宽显得残缺，直接整宽输出。 */
+  if (wwdsCharts.length === 2) h += '<div class="grid2">' + wwdsCharts.join('') + '</div>';
+  else h += wwdsCharts.join('');
 
   var cfg = {
     key: page.key + '@' + (snap.date || ''),
@@ -913,9 +1108,11 @@ function renderWwds(page, snap) {
            esc(d.episodes) + ' 集 · 上线 ' + esc(d.online || '—') + '</div>';
       /* 历史最高放前面并加粗：列表的「最高热度」列就是这个值，两者必须一眼对得上。
          最新热度会随时间衰减，只作参考放后面。 */
+      /* ⛔ 「总收藏」已删（用户 2026-09-14）：上游 xlsx 的「红果总收藏」整列
+         59,260 行**全部为 None**（实测，不是我们取错列），展示出来恒为「总收藏 0」，
+         会被读成"这部剧零收藏"。该字段若上游恢复供数，再加回来并先核实分布。 */
       x += '<div class="kv" style="margin-top:5px">历史最高热度 <b style="color:var(--up)">' +
            wan(d.heat_max || d.heat) + '</b>（榜单排序依据）· 最新热度 ' + wan(d.heat) +
-           ' · 总收藏 ' + num(d.collect) +
            ' · 追剧 ' + num(d.follow) + ' · 趋势 ' + esc(d.trend || '—') + '</div>';
       if (d.tags) x += '<div class="kv" style="margin-top:5px">题材标签 ' + esc(d.tags) + '</div>';
       return x;
@@ -935,26 +1132,37 @@ function renderCopyrightBoard(page, snap) {
 
   var h = notesHtml(page);
 
-  /* 历史快照说明：书单固定用最新榜单日的 TopN，而历史快照采集时部分新书尚未上榜，
-     因此会有「该期无数据」的书。这不是采集失败，需要如实解释，避免误读。 */
+  /* 「未采集」说明：书单取「<= 本快照日的最近榜单日」的 TopN（2026-09-08 起按快照配对），
+     该期采集时若个别书刚上榜、或采集未覆盖到，就会出现「该期无数据」。
+     这不是采集失败，是分母口径，需要如实解释避免误读。
+     用户 2026-09-07 要求：这类口径说明不再占一整条告警框，收进「在榜作品」卡的 ⓘ 浮窗。 */
   var covered = snap.covered != null ? snap.covered : baseBooks;
+  var weiCaiJiPop = '';
   if (covered < s.books) {
-    h += '<div class="warnbox"><div class="warn-row">' +
-         '本页书单固定为最新榜单日（' + esc(m.board_date || '—') + '）的 Top' + num(s.books) +
-         '。在 ' + esc(snap.date) + ' 这期改编数据中，其中 ' + num(s.books - covered) +
-         ' 本尚未上榜（多为近期新上榜作品），因此没有对应记录，表中显示为「未采集」。' +
-         '改编率按该期有数据的 ' + num(covered) + ' 本计算。</div></div>';
+    weiCaiJiPop = popKeHtml(
+      '<p class="pop-p">本快照配对的榜单日为 <b>' + esc(snap.bangdan_ri || '—') +
+      '</b>（取不晚于改编采集日 ' + esc(snap.date) + ' 的最近一期），共 Top' +
+      num(s.books) + '。其中 ' + num(s.books - covered) +
+      ' 本在该期改编数据里没有对应记录（多为该期采集未覆盖到），' +
+      '表中显示为「未采集」。改编率按该期有数据的 ' + num(covered) + ' 本计算。</p>',
+      '查看在榜作品与未采集口径');
   }
   var denom = covered || baseBooks;
 
-  h += '<div class="stats">';
-  h += statCard('在榜作品', num(s.books), page.key === 'qidian_coll'
-                ? num(baseBooks) + ' 本有改编数据' : '榜单 Top' + num(m.top_n || s.books));
+  h += '<div class="stats stats-3">';
+  /* 副标题统一写「榜单 TopN」。
+     ⛔ 不要给 qidian_coll 单独写成「N 本有改编数据」（2026-09-09 用户明确删除）：
+     那个 N 是 books_with_detail = 改编字段**已采到**的书数（含平台明确写「无」的，
+     如《圣墟》adaptation_raw='无'），极易被读成「N 本有改编」，与右边
+     「已披露改编 403」当场矛盾（实测 960 在榜 / 919 已采 / 403 有改编）。
+     已采与未采的差额由上面 weiCaiJiPop 的 ⓘ 浮窗解释，不塞进副标题。 */
+  h += statCard('在榜作品', num(s.books), '榜单 Top' + num(m.top_n || s.books),
+                '', weiCaiJiPop);
   h += statCard('已披露改编', num(s.adapted), '改编率 ' + pct(s.adapted, denom) +
                 (covered < s.books ? '（按已采 ' + num(covered) + ' 本计）' : ''));
-  h += statCard('改编形态种类', num(tags.length),
-                tags.length ? tags.slice(0, 3).map(function (x) { return esc(x.tag) + ' ' + x.books; }).join(' · ')
-                            : '暂无已披露的改编');
+  /* ⛔ 2026-09-08 用户明确删掉「改编形态种类」指标卡：与下方「改编形态分布」柱图
+     信息冗余（卡里 slice(0,3) 还只能显示前 3 类，晋江积分榜实际有 30 类，看着像漏数据）。
+     不要再加回来。`tags` 变量必须保留 —— 下方柱图还在用（tags.slice(0, 8)）。 */
   if (isJJ && s.depth && s.depth.max_types) {
     h += statCard('单本最多签约类型', num(s.depth.max_types),
                   '《' + esc(s.depth.max_book) + '》· 中位 ' + num(s.depth.median_types) + ' 类');
@@ -987,12 +1195,12 @@ function renderCopyrightBoard(page, snap) {
   }
   if (charts.length === 2) h += '<div class="grid2">' + charts.join('') + '</div>';
   else if (charts.length === 1) h += charts.join('');
-  else {
-    /* 整榜零签约（如晋江积分月榜）时两张图都无数据可画，
-       给一句空状态说明，避免读者以为图表加载失败。 */
-    h += cardHtml('改编形态分布', '按书数统计，同一本书可有多种形态',
-      '<div class="empty-box">该榜在榜作品均未公开任何改编版权信息，暂无形态分布可展示。</div>');
-  }
+  /* ⛔ 2026-09-09 用户明确删掉「整榜零签约时的空状态图卡」，charts 为空就什么都不渲染。
+     背景：晋江积分月榜 Top50 四期 adapted 恒为 0（已核实**不是 bug**——月榜是当月新热文，
+     平台版权状态全部为「尚未出版（联系出版）」；同一批书在积分榜 Top1000 库里取值一致，
+     两库交集 50/50 关联正确），所以这张卡在该页是**常驻**空卡，毫无信息量。
+     「整榜零签约」这件事已由 lib_insight.no_signing_insight() 的洞察卡完整解释。
+     不要再加回来。 */
 
   var cols = [
     { k: 'rank', label: '#', w: '40px', type: 'num',
@@ -1069,83 +1277,541 @@ function renderCopyrightBoard(page, snap) {
   };
   h += tableHtml(cfg);
   if (page.key === 'qidian_coll') {
-    h += '<div class="footnote">' + num(baseBooks) +
-         ' 本有改编数据，改编率按这部分作品计算。该榜目前只采集过一期' +
+    /* ⛔ 这里原来只写「919 本有改编数据」（2026-09-09 用户明确要求删掉）：
+       "有改编数据" 指的是"改编字段已采到"，被读成"有改编"，与「已披露改编 403」矛盾。
+       现在把 960 → 919 → 403 三层漏斗和 41 本的成因一次说清，不留歧义。
+       41 本的真实原因（已核实）：起点书页详情抓取失败被跳过，
+       07-09 那轮失败 41 本、07-10 续跑再试同一批仍全部失败（222 待抓 - 181 成功 = 41），
+       与书的状态/题材无关，属该 41 本书页稳定抓不到。 */
+    h += '<div class="footnote">在榜 ' + num(s.books) + ' 本中，已采到改编字段的 ' +
+         num(baseBooks) + ' 本（含平台明确标注「无」的），其中 ' + num(s.adapted) +
+         ' 本有改编披露，改编率即 ' + num(s.adapted) + '/' + num(baseBooks) + '。另有 ' +
+         num(s.books - baseBooks) + ' 本因书页详情抓取失败未采到改编字段（表中显示「未采集」），' +
+         '不计入分母，也不代表它们没有改编。该榜目前只采集过一期' +
          '（改编详情分 2 天跑完，属同一期），因此暂无历史快照可切换。</div>';
   }
   return { html: h, bind: function () { bindTable(cfg); } };
 }
 
-/* ---------------- 页面：总览驾驶舱 ---------------- */
+/* ---------------- 页面：概览 ----------------
+   2026-09-14 用户定案的四块结构，改动前必读这段注释：
+
+   ① 头部改编速览  六榜各 Top10 **逐本明细**（不是改编率！草稿做成百分比卡被驳回）。
+                   短期榜在左、长期榜在右，按平台分三行。
+                   ⛔ 每张卡**必须满 10 行**，未改编/无签约的书要露出空行。
+   ② 三平台改编分布 **统一用三个长期榜**（巅峰榜 Top30 / 收藏榜 Top1000 / 积分榜 Top1000）。
+                   ⛔ 绝不是"哪个榜数据多挑哪个"——番茄短期榜数据更丰富，
+                     但混着用就成了挑数据（2026-09-14 已被用户驳回一次）。
+                   横条（用户指定，非饼图），三张独立卡各自标口径行与日期。
+   ③ 本期新增      C1（全库 parts_per_book 逐期趋势）+ C3（头部个别书部数增长）。
+                   ⛔ 不出 C2「榜单头部平均改编部数」，也**不解释它为什么下降**
+                     （用户 2026-09-14 明确）。想加请先问过用户。
+   ④ 概览洞察      文案全部由 ETL 侧 lib_insight.gailan_insights() 生成。
+
+   ⛔ 已删且不要写回来的两块：
+      - 「各数据集概览」入口表（用户：一点信息量没有）
+      - 「各榜单改编率横向对比」横条（用户：这几个平台不可横向对比）
+        随之 [data-goto] 跳转也没了，bind 里不必再绑。 */
+
+/* 类型名简称表（用户 2026-09-14 定：去掉末尾「签约」两字，节省列宽）。
+   ⚠ 晋江有 32 种类型，全名最长 11 字（「中国大陆出版最新签约」），
+     横排根本排不下。但**只在展示层做简称**，数据层保留全名：
+       · 列宽按简称算，不会因换期类型名变长而崩；
+       · 鼠标悬停 title 仍是全名，不丢信息。
+   两个特例按用户原话单独映射，其余统一去掉末尾「签约」。 */
+var G10_LEI_JIANCHENG = {
+  '中国大陆出版最新签约': '中国大陆出版',
+  '繁体出版(港/台)签约': '繁体出版(港/台)'
+};
+
+function gailanJianCheng(t) {
+  if (G10_LEI_JIANCHENG[t]) return G10_LEI_JIANCHENG[t];
+  return String(t || '').replace(/签约$/, '') || t;
+}
+
+/* ① 取「该榜 Top10 内实际出现过的改编类型」，作为表头列。
+   ⚠ 不用全榜类型集：晋江全榜有 32 种，Top10 内只出现十几种，
+     用全榜的会撑出一屏表头 + 一排空列。Top10 内有出现的才有信息量。
+   并且两期榜单同名同 rank，表头在两期之间稳定 —— 不存在"换期列宽跳变"。 */
+function gailanLeiBiao(b) {
+  var seen = {}, out = [];
+  (b.rows || []).forEach(function (r) {
+    (r.qianyue_leixing || []).forEach(function (t) {
+      if (!seen[t]) { seen[t] = true; out.push(t); }
+    });
+  });
+  return out;
+}
+
+/* ① 单个榜的 Top10 明细卡。
+   番茄：短剧/漫剧/其他 三列直接给部数（用户 2026-09-14 定案）。
+   起点/晋江：**模仿番茄做成「一类型一列」**，有就 √、没有留空
+     （用户 2026-09-14 明确：不要一行一个改编）。
+     ⚠ 列是「平台自己的签约类型」，番茄列是「改编形态」，两者语义不同，
+       卡片副标题与脚注必须各自写明，不能并排比数值。
+
+   ⚠ 横向对齐（用户 2026-09-14 要求在「模块之间」左右上下都要对齐）：
+     同一行两张卡的列宽规则必须一致 —— 否则起点卡的第一列标签
+     和晋江卡的第一列标签会错开，看起来就是没对齐。
+     做法：① 用同一个 `gridTemplateColumns()` 生成器；② # / 书名 /
+     类型列都用**同样的 px 宽度**；③ 书名列吃 1fr，把前面几张表
+     压成等宽（这是对齐的前提，不是巧合）；④ 副标题固定在最后写。 */
+
+/* 列宽规则。
+   ⚠ 每个 `.g10-tr` 是**独立的一个 grid**，列宽必须定死 px ——
+     用 auto 会各行按自己的内容解析，行与行立刻错位（竖排时代列宽固定 20/24px
+     没暴露这个问题，改横排后字宽不一，必须重算）。
+   类型列宽 = 本卡内**最长简称**折算的 px，类型之间等宽（行才对得齐）。
+   书名列给 110px 下限，表再窄也不会把书名挤没。
+   总宽超卡片时由外层 `.g10-scroll` 横向滚动（用户 2026-09-14：容不下就加滚动条）。 */
+var G10_SHUMING_KUAN = 110;
+var G10_LIE_JIANXI = 8;        // 必须与 .g10-tr 的 gap 一致，否则 min-width 算少、最后一列被裁
+
+function gailanLeiKuan(ge) {
+  var m = 2;
+  (ge || []).forEach(function (t) {
+    var n = gailanJianCheng(t).length;
+    if (n > m) m = n;
+  });
+  return Math.min(96, Math.round(m * 11.5 + 10));
+}
+
+function gailanGrid(plat, ge) {
+  if (plat === 'fanqie') {
+    return '28px minmax(' + G10_SHUMING_KUAN + 'px,1fr) 46px 46px 46px';
+  }
+  var w = gailanLeiKuan(ge);
+  return '28px minmax(' + G10_SHUMING_KUAN + 'px,1fr)' +
+         new Array(ge.length + 1).join(' ' + w + 'px');
+}
+
+/* 表格最小宽度：卡片比它窄就出现横向滚动条。
+   ⚠ 必须把列间距算进去 —— 少算 (k+1)*8 会让最后一列被裁掉一点。 */
+function gailanZuiXiao(plat, ge) {
+  var k = plat === 'fanqie' ? 3 : ge.length;
+  var w = plat === 'fanqie' ? 46 : gailanLeiKuan(ge);
+  return 28 + G10_SHUMING_KUAN + k * w + (k + 1) * G10_LIE_JIANXI;
+}
+
+/* ① 表头：书名那一格右边带一个小注（番茄「单位：部」/ 起晋「签约」）。 */
+function gailanHeadHtml(b, ge, grid) {
+  var isFanqie = b.platform === 'fanqie';
+  var h = '<div>#</div>' +
+          '<div class="g10-shu">书名<i>' + (isFanqie ? '单位：部' : '签约') + '</i></div>';
+  if (isFanqie) {
+    ['短剧', '漫剧', '其他'].forEach(function (t) {
+      h += '<div class="g10-lei">' + t + '</div>';
+    });
+  } else {
+    ge.forEach(function (t) {
+      /* 显示用简称、title 保留全名 —— 简称只是省列宽，不能把信息弄丢 */
+      h += '<div class="g10-lei" title="' + esc(t) + '">' + esc(gailanJianCheng(t)) + '</div>';
+    });
+  }
+  return '<div class="g10-tr g10-head" style="grid-template-columns:' +
+         grid + '">' + h + '</div>';
+}
+
+function gailanTop10Card(b) {
+  var isFanqie = b.platform === 'fanqie';
+  var qiXianTxt = b.qi_xian === 'duan' ? '短期榜' : '长期榜';
+  var head = cardHtml(b.label, qiXianTxt + ' · Top10',
+    '<div class="empty-box">' + esc(b.wu_fa_xianshi) + '</div>');
+  if (b.wu_fa_xianshi) return head;
+
+  var rows = b.rows || [];
+  var ge = isFanqie ? [] : gailanLeiBiao(b);
+  var grid = gailanGrid(b.platform, ge);
+
+  /* 长类型名改横排后总宽可能超过卡片（晋江 Top10 实测 14 列 ≈ 1.3k px），
+     外层 .g10-scroll 给横向滚动条，表本身用 min-width 撑住不被压扁。 */
+  var body = '<div class="g10-scroll"><div class="g10-tbl" style="min-width:' +
+             gailanZuiXiao(b.platform, ge) + 'px">' + gailanHeadHtml(b, ge, grid);
+  rows.forEach(function (r) {
+    var cells = isFanqie
+      ? ['duanju', 'manju', 'qita'].map(function (k) {
+          var v = r[k] || 0;
+          /* 0 值压灰而不是留空 —— 留空会被当成"没采到"，0 是真的 0 */
+          return '<div class="g10-num' + (v ? '' : ' z') + '">' + v + '</div>';
+        }).join('')
+      : ge.map(function (t) {
+          /* √ = 平台在本期公开披露了这一签约类型；空 = 没披露。
+             ⚠ 空 ≠ 没签约，脚注里必须写清（原来是「未采集 / 无签约」两种态，
+               现在统一成"空"，所以脚注要把两件事都覆盖到）。 */
+          var you = (r.qianyue_leixing || []).indexOf(t) >= 0;
+          return '<div class="g10-lei g10-gou">' + (you ? '√' : '') + '</div>';
+        }).join('');
+    body += '<div class="g10-tr" style="grid-template-columns:' + grid + '">' +
+            '<div><span class="rankno">' + (r.rank || '—') + '</span></div>' +
+            '<div class="cell name" title="' + esc(r.name) + '">' + esc(r.name) + '</div>' +
+            cells + '</div>';
+  });
+  body += '</div></div>';
+
+  /* 脚注：口径 + 两个日期。番茄巅峰榜实测榜单日与改编采集日能差 9 天，
+     只标一个会让读者以为是同一天的数据。 */
+  var foot = isFanqie
+    ? '数字为番茄 App 改编板块内已上线的作品部数（可有多部）。'
+    : '每列是平台公开披露的一种版权签约类型，√ 表示该书被标注了该类型，'
+      + '空表示本期页面未披露——空不等于未签约，更不代表未改编；'
+      + '一本书可以同时被标注多种类型，所以一行可以有多个 √。';
+  foot += '榜单日 ' + esc(b.bangdan_ri || '—') + '，改编采集日 ' + esc(b.caiji_ri || '—');
+  if (b.bangdan_ri && b.caiji_ri && b.bangdan_ri !== b.caiji_ri) foot += '（两者不同期）';
+  foot += '。';
+  if (rows.length < 10) {
+    foot += ' ⚠ 该榜当期仅取到 ' + rows.length + ' 行（预期 10 行）。';
+  }
+  body += '<div class="g10-foot">' + esc(foot) + '</div>';
+  return cardHtml(b.label, qiXianTxt + ' · Top10', body);
+}
+
+/* ② 单个长期榜的分布卡 */
+function gailanFenbuCard(f) {
+  if (f.wu_fa_xianshi) {
+    return cardHtml(f.label, '改编分布',
+      '<div class="empty-box">' + esc(f.wu_fa_xianshi) + '</div>');
+  }
+  var xiang = f.xiang || [];
+  if (!xiang.length) {
+    return cardHtml(f.label, '改编分布',
+      '<div class="empty-box">该榜当期没有任何改编/签约标注，无分布可画。</div>');
+  }
+  var color = 'var(--' + (f.platform || 'overview') + ')';
+  if (f.platform !== 'fanqie' && f.platform !== 'qidian' && f.platform !== 'jjwxc') {
+    color = 'var(--ink)';
+  }
+  var rows = xiang.map(function (x) {
+    return { k: x.k, v: x.v, t: num(x.v) + ' ' + (f.dan_wei || '') };
+  });
+  var body = barsHtml(rows, color);
+  var foot = f.kou_jing + '。';
+  if (f.lei_mu_zong > xiang.length) {
+    foot += '共 ' + f.lei_mu_zong + ' 类，图示数量前 ' + xiang.length + ' 类。';
+  }
+  foot += '榜单日 ' + esc(f.bangdan_ri || '—') + '，改编采集日 ' + esc(f.caiji_ri || '—') + '。';
+  if (f.qi_shu < 2) foot += '该榜目前仅 ' + f.qi_shu + ' 期，暂无法与历史对比。';
+  body += '<div class="g10-foot">' + esc(foot) + '</div>';
+  return cardHtml(f.label, '长期榜 · 改编分布（单位：' + (f.dan_wei || '') + '）', body);
+}
+
+/* ③ 全库改编深度逐期（C1）。
+   ⚠ 刻意用横条不用折线：只有 6 期、且量级差只有 0.2 部，折线会把 2.1→2.3
+      画成陡坡，视觉上夸大变化。横条按绝对值等比，读者自己看得出"缓慢上升"。 */
+function gailanPpbHtml(ppb) {
+  if (!ppb || !ppb.length) {
+    return '<div class="g-xz-none">番茄改编全库暂无可用期次，无法显示深度趋势。</div>';
+  }
+  var max = Math.max.apply(null, ppb.map(function (x) { return x.ppb; }).concat([1]));
+  var h = '<div class="g-ppb">' + ppb.map(function (x, i) {
+    return '<div class="g-ppb-row' + (i === ppb.length - 1 ? ' now' : '') + '">' +
+      '<div class="rq">' + esc((x.ri || '').slice(5)) + '</div>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' +
+      (x.ppb / max * 100).toFixed(1) + '%;background:var(--fanqie)"></div></div>' +
+      '<div class="vv">' + x.ppb + ' 部/本</div></div>';
+  }).join('') + '</div>';
+  var tou = ppb[0], wei = ppb[ppb.length - 1];
+  h += '<div class="g10-foot">' + esc(
+    '平均每本改编部数 = 该期改编作品总部数 / 入库小说数。' +
+    tou.ri + ' 共 ' + num(tou.books) + ' 本 / ' + num(tou.dramas) + ' 部，' +
+    wei.ri + ' 共 ' + num(wei.books) + ' 本 / ' + num(wei.dramas) + ' 部。' +
+    '该口径覆盖番茄改编全库（非榜单头部）。') + '</div>';
+  return h;
+}
+
+/* ── ③·五 番茄全库「热度分层分布」趋势（2026-09-14 新增）──────────────
+   每月两根柱（AI 漫剧 / 真人短剧），柱内按三档堆叠：
+     <3000 万（最浅）/ 3000-6000 万（中间）/ ≥6000 万（最深，同色系）。
+   ⚠ 柱高 = 该月新上线部数，AI 与真人**共用同一纵轴**，谁多谁少一眼可见。
+     真人柱在近月很矮是真实形态（AI 已占绝对多数），压成等高反而是在撒谎。
+
+   ⚠⚠ ⛔ 柱高必须**严格等于当月真实部数**（用户 2026-09-14 明确：原实现把高档段
+     「抬高柱顶」补高度，总高与部数对不上，失真）。
+     ≥6000 万档实测只占 0.19%（全库 109 部），等比画出来确实是发丝，
+     所以允许**在柱内做守恒微调**：从紧邻的 3000-6000 万段匀出 ≤ RF_GAO_BU 像素
+     给 ≥6000 万段 —— **mid 减多少、high 加多少，三段之和与柱顶高度完全不变**。
+     ⛔ 不许再抬高柱顶、不许给任何段加保底高度（那都会让总高对不上部数）。
+     ⛔ 匀的量**双封顶**（≤3px 且 ≤ 柱高 10%）：真人柱近月只有 7px 高，
+        匀 3px 会让高档占 41% 而真实仅 2.7% —— 那是把图改错，比发丝更糟。
+     ⛔ 不许反过来改切点让高档变粗 —— 切点是用户定的业务口径，
+        改切点等于改结论（MEMORY 第 5 条铁律）。
+     ⛔ 高档段不再画 ▲ 与柱顶数字：悬停提示已给出每档精确部数（用户 2026-09-14）。 */
+var RF_GAO_BU = 3;             // ≥6000 万段最多从 3000-6000 万段匀出的像素（守恒，不改总高）
+var RF_GAO_BU_PCT = 0.10;      // 高档段**最终高度**不超过本柱总高的 10%（矮柱上 3px 就是 40%，那是改错图）
+var RF_SE = {                  // 三档同色系，浅 → 深；AI 紫系、真人橙系
+  ai:   { low: '#C4B5FD', mid: '#7C3AED', high: '#3B0764' },
+  real: { low: '#FED7AA', mid: '#EA580C', high: '#7C2D12' }
+};
+
+function reduFencengHtml(rf) {
+  var rows = (rf && rf.rows) || [];
+  if (rf && rf.wu_fa_xianshi) {
+    return '<div class="empty-box">' + esc(rf.wu_fa_xianshi) + '</div>';
+  }
+  if (rows.length < 2) {
+    return '<div class="empty-box">番茄改编全库可归月的改编作品不足 2 个月，无法画趋势。</div>';
+  }
+  var W = 680, H = 210, PL = 46, PR = 14, PT = 30, PB = 26;
+  var iw = W - PL - PR, ih = H - PT - PB;
+  var gw = iw / rows.length;                 // 每月一组（两根柱）
+  var bw = 19, bgap = 3;                     // 柱宽 / 两柱间距
+  var pairW = bw * 2 + bgap;
+
+  /* 共用纵轴上界：取 AI 与真人**所有月份**的最大值。
+     不能各自缩放 —— 那会让「AI 占绝对多数」这个事实消失。 */
+  var maxV = 1;
+  rows.forEach(function (r) {
+    if (r.ai.total > maxV) maxV = r.ai.total;
+    if (r.real.total > maxV) maxV = r.real.total;
+  });
+  var step = Math.pow(10, String(Math.floor(maxV)).length - 1);
+  var top = Math.ceil(maxV / step) * step;
+  var Y = function (v) { return PT + ih - v / top * ih; };
+  var X = function (i, k) {                  // 第 i 月第 k 根柱（0=AI,1=真人）的左边界
+    return PL + i * gw + (gw - pairW) / 2 + k * (bw + bgap);
+  };
+
+  var g = '';
+  /* 横向网格线 + Y 轴刻度（4 等分） */
+  for (var t = 0; t <= 4; t++) {
+    var v = top / 4 * t, y = Y(v);
+    g += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - PR) +
+         '" y2="' + y.toFixed(1) + '" stroke="var(--line)" stroke-width="1"/>' +
+         '<text x="' + (PL - 7) + '" y="' + (y + 3.5).toFixed(1) +
+         '" text-anchor="end" font-size="10" fill="var(--ink-3)">' +
+         num(Math.round(v)) + '</text>';
+  }
+
+  /* 柱体：自下而上 low → mid → high。
+     ⛔ 三段高度之和必须 == 该月真实部数的等比高度，柱顶 = 真实值（用户 2026-09-14）。 */
+  rows.forEach(function (r, i) {
+    ['ai', 'real'].forEach(function (lei, k) {
+      var d = r[lei], x = X(i, k);
+      var h = ['low', 'mid', 'high'].map(function (dang) {
+        return (d[dang] || 0) / top * ih;              // 纯等比，不加任何保底
+      });
+      /* 守恒微调：≥6000 万段太细看不见，从紧邻的 3000-6000 万段匀出一点点。
+         mid 减多少、high 加多少 ⇒ 总和不变、柱顶不动。
+         ⚠ 封顶是**高档段最终高度**的上限（不是"匀出多少"的上限）——
+           约束匀出量的话，最终高度 = 真实 + 匀出，仍会突破比例（实测 12.6%）。
+         ⚠ 三重封顶，缺一不可（少一条就会在矮柱上严重失真）：
+           · 绝对值 ≤ RF_GAO_BU px（真实高度已够就不匀）；
+           · 不超过**本柱总高**的 RF_GAO_BU_PCT —— 真人柱近月只有 7px 高，
+             匀到 3px 会让高档占 41%（真实仅 2.7%），那是把图改错；
+           · mid 至少留 1px，不许把中档扣没。 */
+      if (h[2] > 0 && h[1] > 0) {
+        var zhuGao = h[0] + h[1] + h[2];
+        var xian = Math.min(RF_GAO_BU, zhuGao * RF_GAO_BU_PCT);
+        var bu = Math.min(Math.max(0, xian - h[2]), Math.max(0, h[1] - 1));
+        h[1] -= bu;
+        h[2] += bu;
+      }
+      var y = PT + ih;                                 // 从底部往上堆
+      ['low', 'mid', 'high'].forEach(function (dang, j) {
+        if ((d[dang] || 0) <= 0 || h[j] <= 0) return;
+        y -= h[j];
+        g += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) +
+             '" width="' + bw + '" height="' + h[j].toFixed(1) +
+             '" fill="' + RF_SE[lei][dang] + '"/>';
+      });
+    });
+  });
+
+  /* X 轴月份 + 悬停命中区（与折线图同款：整月一条竖条，鼠标好命中） */
+  rows.forEach(function (r, i) {
+    g += '<text x="' + (PL + i * gw + gw / 2).toFixed(1) + '" y="' + (H - 9) +
+         '" text-anchor="middle" font-size="10" fill="var(--ink-3)">' + esc(r.month) + '</text>';
+    var tip = r.month + '\nAI 漫剧 ' + num(r.ai.total) + ' 部（低 ' + num(r.ai.low) +
+              ' / 中 ' + num(r.ai.mid) + ' / 高 ' + num(r.ai.high) + '）\n真人短剧 ' +
+              num(r.real.total) + ' 部（低 ' + num(r.real.low) + ' / 中 ' +
+              num(r.real.mid) + ' / 高 ' + num(r.real.high) + '）';
+    g += '<rect class="hit" x="' + (PL + i * gw).toFixed(1) + '" y="' + PT +
+         '" width="' + gw.toFixed(1) + '" height="' + ih + '"><title>' +
+         esc(tip) + '</title></rect>';
+  });
+
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="linechart" role="img">' + g + '</svg>';
+
+  /* 图例：两个系列 × 三档，共 6 个色块。分两行写，一行 6 个会挤到换行错位。 */
+  var dangMing = ['<3000万', '3000-6000万', '≥6000万'];
+  function lie(lei, ming) {
+    return '<span>' + ming + '：' + dangMing.map(function (t, j) {
+      var c = RF_SE[lei][['low', 'mid', 'high'][j]];
+      return '<i style="background:' + c + '"></i>' + t;
+    }).join('') + '</span>';
+  }
+  var legend = '<div class="legend">' + lie('ai', 'AI 漫剧') + lie('real', '真人短剧') +
+               '<span>鼠标悬停可看当月各档精确部数</span></div>';
+
+  /* 脚注：口径 + 保底声明。少了这两句，上面那张图就是在误导。 */
+  var dang = (rf.dang || []).map(function (v) { return wan(v); });
+  var foot = '按改编作品上线月份统计当月新上线的作品部数；' +
+    '热度取红果历史最高热度（非当月值，最近上线的作品峰值可能尚未爬到顶）。' +
+    '三档切点为业务口径：' + (dang[0] ? '<' + dang[0] : '') +
+    (dang[1] ? ' / ' + dang[0] + '-' + dang[1] + ' / ≥' + dang[1] : '') + '。' +
+    'AI 与真人共用同一纵轴，柱高严格等于当月部数。';
+  if (rf.you_redu_zong && rf.gao_zong) {
+    foot += ' ≥' + (dang[1] || '6000万') + ' 档在最近 ' + rows.length +
+      ' 个月里共 ' + num(rf.gao_zong) + ' 部，占有热度作品 ' +
+      num(rf.you_redu_zong) + ' 部的 ' +
+      (rf.gao_zong / rf.you_redu_zong * 100).toFixed(2) +
+      '%，等比绘制仅为发丝，故从同柱 3000-6000 万档匀出不超过 ' + RF_GAO_BU +
+      'px（且不超过柱高 ' + Math.round(RF_GAO_BU_PCT * 100) +
+      '%）显示，柱高不变、仍等于当月真实部数，各档数量以悬停提示为准。';
+  }
+  foot += '热度缺失的作品不计入任何一档。';
+  /* ⚠ 在途月（数据截止月）只采了不到整月，整月剔除 —— 不补 0、不按天数折算
+     （折算会假设上线节奏均匀，那是编数据）。必须写明，否则读者以为漏了最新一个月。 */
+  if (rf.yi_ti_yue) {
+    foot += '数据截止月 ' + rf.yi_ti_yue + ' 尚未采满整月，已整月剔除（不做天数折算）。';
+  }
+  return svg + legend + '<div class="g10-foot">' + esc(foot) + '</div>';
+}
+
+/* ③ 番茄头部个别书部数增长（C3） */
+function gailanTopZengHtml(list) {
+  if (!list || !list.length) {
+    return '<div class="g-xz-none">本期两个番茄榜单的 Top10 内，没有作品的短剧+漫剧部数增加。</div>';
+  }
+  var h = '<div class="g-xz-list">' + list.map(function (x) {
+    return '<div class="g-xz-item">' +
+      '<div><span class="rankno">' + x.rank + '</span></div>' +
+      '<div class="cell name" title="' + esc(x.name) + '">' + esc(x.name) +
+      ' <span class="cell dim" style="font-weight:400">· ' + esc(x.bang) + '</span></div>' +
+      '<div class="bs">' + x.before + ' → ' + x.after + ' 部 (+' + x.delta + ')</div>' +
+      '</div>';
+  }).join('') + '</div>';
+  var qj = list[0] || {};
+  h += '<div class="g10-foot">' + esc(
+    '「部数」= 番茄 App 改编板块内已上线的短剧+漫剧部数。' +
+    '对比基准为各榜自己的上一期（' + (qj.shang_qi_ri || '—') + ' → ' +
+    (qj.ben_qi_ri || '—') + '），只统计两期都在榜的书。') + '</div>';
+  return h;
+}
+
+/* ③ 起点 / 晋江的新增签约。
+   ⚠ 展示上不再出现任何「TopN 头部」字样（用户 2026-09-14：
+     晋江长期榜本来就是 Top1000，写 Top50 是基础错误）。
+     名次范围如果真有截断，由 ETL 的 label 说明，不由前端拼。 */
+function gailanXinzengQianyueHtml(x, plat) {
+  var xin = plat === 'jjwxc' ? '新增签约类型' : '新增签约';
+  if (!x || x.wu_fa_xianshi) {
+    return '<div class="g-xz-none">' + esc((x && x.wu_fa_xianshi) || '暂无数据。') + '</div>';
+  }
+  var rows = x.rows || [];
+  if (!rows.length) {
+    /* 用户 2026-09-14 明确：0 本也要保留该行写「本期无新增」，
+       不能整块隐藏 —— 隐藏会让读者以为这个平台没被跟踪。
+       ⚠ 免责句这里也必须带上：「本期无新增」很容易被读成「这批书没有版权动作」，
+         而实际含义只是"平台本期没有新公开标注"。两个分支的免责文案要一致。 */
+    var txt = '本期无新增。全榜连续在榜的作品中，没有新公开的签约类型' +
+              '（对比上期 ' + (x.shang_qi_ri || '—') + '）。';
+    txt += '签约类型由平台主动披露，无新增仅代表本期页面上没有出现新标注，' +
+           '不代表此前未授权，也不代表作品已开始制作或上线。';
+    return '<div class="g-xz-none">' + esc(txt) + '</div>';
+  }
+  /* 列表也做成「一类型一列打 √」的表格，与 ① 的列头表风格统一
+     （用户 2026-09-14：不要一行一个改编）。列 = 本卡内出现过的类型。 */
+  var ge = [];
+  var seen = {};
+  rows.forEach(function (r) {
+    (r.xinzeng_leixing || []).forEach(function (t) {
+      if (!seen[t]) { seen[t] = true; ge.push(t); }
+    });
+  });
+  var grid = gailanGrid(plat, ge);
+  var h = '<div class="g10-scroll"><div class="g10-tbl" style="min-width:' +
+          gailanZuiXiao(plat, ge) + 'px"><div class="g10-tr g10-head" ' +
+          'style="grid-template-columns:' + grid + '"><div>#</div>' +
+          '<div class="g10-shu">书名<i>' + esc(xin) + '</i></div>' +
+          ge.map(function (t) {
+            /* 与 ① 同一套简称：显示简称、title 全名 */
+            return '<div class="g10-lei" title="' + esc(t) + '">' +
+                   esc(gailanJianCheng(t)) + '</div>';
+          }).join('') + '</div>';
+  rows.forEach(function (r) {
+    var tags = r.xinzeng_leixing || [];
+    h += '<div class="g10-tr" style="grid-template-columns:' + grid + '">' +
+         '<div><span class="rankno">' + (r.rank || '—') + '</span></div>' +
+         '<div class="cell name" title="' + esc(r.name) + '">' + esc(r.name) + '</div>' +
+         ge.map(function (t) {
+           return '<div class="g10-lei g10-gou">' +
+                  (tags.indexOf(t) >= 0 ? '√' : '') + '</div>';
+         }).join('') + '</div>';
+  });
+  h += '</div></div>';
+  h += '<div class="g10-foot">' + esc(
+    '统计范围：该榜全榜，且两期都在榜的书（新进榜作品的签约不算本期新增）。' +
+    '对比上期 ' + (x.shang_qi_ri || '—') + ' → 本期 ' + (x.caiji_ri || '—') + '。' +
+    '签约类型由平台主动披露，新增仅代表本期页面上新出现该标注，' +
+    '不代表此前未授权，也不代表作品已开始制作或上线。') + '</div>';
+  return h;
+}
+
 function renderOverview() {
   var ov = DATA.overview || {};
-  var pages = DATA.pages || {};
-  var order = ['fanqie_wwds', 'fanqie_hot', 'fanqie_peak',
-               'qidian_sales', 'qidian_coll', 'jjwxc_month', 'jjwxc_score'];
+  var h = '';
 
-  /* 数据集入口卡 */
-  var g = 'minmax(0,1.5fr) 80px 104px 104px 62px 66px';
-  var b = '<div class="dtr dhead" style="grid-template-columns:' + g + '">' +
-          '<div>数据集</div><div class="cell num">条数</div><div>榜单日</div>' +
-          '<div>改编采集日</div><div class="cell num">快照数</div><div></div></div>';
-  order.forEach(function (k) {
-    var p = pages[k]; if (!p) return;
-    var m = p.meta || {}, cn = navOf(k);
-    var ss = p.snapshots || [];
-    var first = ss[0] || {};
-    var src = m.board_src || {};
-    var nameCell = '<span style="display:inline-flex;align-items:center;gap:6px">' +
-                   logoSvg(cn.p, 15) + esc(p.label || k) + '</span>';
-    if (src.source_url) {
-      nameCell += ' <a href="' + esc(src.source_url) + '" target="_blank" rel="noopener" ' +
-                  'title="打开原站：' + esc(src.source || '') + '" ' +
-                  'style="color:var(--' + cn.p + ');font-size:11.5px;font-weight:600">↗</a>';
-    }
-    b += '<div class="dtr" style="grid-template-columns:' + g + '">' +
-         '<div class="cell">' + nameCell + '</div>' +
-         '<div class="cell num">' + num(first.rows_count || (first.rows || []).length) + '</div>' +
-         '<div class="cell dim">' + esc(m.board_date || m.rank_date || '—') + '</div>' +
-         '<div class="cell dim">' + esc(first.date || m.detail_date || '—') + '</div>' +
-         '<div class="cell num' + (ss.length > 1 ? '' : ' dim') + '">' + ss.length + '</div>' +
-         '<div><span class="pill pill-ghost" style="height:24px;padding:0 10px;font-size:12px" ' +
-         'data-goto="' + k + '">查看</span></div></div>';
-  });
-  var h = cardHtml('各数据集概览',
-    '7 个数据集采集节奏不同，横向比较时请注意时间差；「快照数」>1 的数据集可在对应页面切换历史改编快照',
-    b);
+  /* ── ① 头部改编速览：按平台分三行，每行左短期右长期 ── */
+  var t10 = ov.top10 || [];
+  if (t10.length) {
+    h += '<div class="card-hd" style="padding:0 0 10px"><span class="h">头部改编速览</span>' +
+         '<span class="s">六个榜单各取 Top10 逐本明细；短期榜在左、长期榜在右</span></div>';
+    ['fanqie', 'qidian', 'jjwxc'].forEach(function (plat) {
+      var bang = t10.filter(function (b) { return b.platform === plat; });
+      if (!bang.length) return;
+      h += '<div class="g10-grid" style="margin-bottom:16px">' +
+           bang.map(gailanTop10Card).join('') + '</div>';
+    });
+  }
 
-  /* 改编率横向对比 */
-  var cmp = [
-    { k: 'fanqie_hot', label: '番茄最热榜 Top50' },
-    { k: 'fanqie_peak', label: '番茄巅峰榜 Top30' },
-    { k: 'qidian_sales', label: '起点畅销榜 Top50' },
-    { k: 'qidian_coll', label: '起点收藏榜 Top1000' },
-    { k: 'jjwxc_month', label: '晋江积分月榜 Top50' },
-    { k: 'jjwxc_score', label: '晋江积分榜 Top1000' }
-  ].map(function (c) {
-    var st = ((pages[c.k] || {}).snapshots || [{}])[0].stats || {};
-    var tot = st.book_total || st.books_with_detail || st.books || 0;
-    var ad = st.adapted_books != null ? st.adapted_books : (st.adapted || 0);
-    return { k: c.label, v: tot ? Math.round(ad / tot * 1000) / 10 : 0,
-             t: pct(ad, tot) + ' · ' + num(ad) + '/' + num(tot) };
-  });
-  h += cardHtml('各榜单改编率横向对比',
-    '番茄为 App 改编板块实际上线作品；起点/晋江为平台公开披露的版权签约，口径不同，不宜直接等同',
-    barsHtml(cmp, 'var(--ink)', 100));
+  /* ── ② 三平台改编分布（统一长期榜） ── */
+  var fb = ov.fenbu || [];
+  if (fb.length) {
+    h += '<div class="card-hd" style="padding:0 0 10px"><span class="h">三平台改编分布</span>' +
+         '<span class="s">统一取各平台的长期榜；三家口径与单位不同，各卡分别标注，不做横向比较</span></div>';
+    h += '<div class="g-fenbu-grid" style="margin-bottom:16px">' +
+         fb.map(gailanFenbuCard).join('') + '</div>';
+  }
 
-  /* 洞察区（文案待补） */
-  h += cardHtml('总览洞察', '跨平台结论文案待补充',
+  /* ── ③ 本期新增 ── */
+  var xz = ov.xinzeng || {};
+  h += '<div class="card-hd" style="padding:0 0 10px"><span class="h">本期新增</span>' +
+       '<span class="s">番茄看已上线部数的增加，起点/晋江看新公开的签约类型；两者不同源，不可合并计数</span></div>';
+  h += '<div class="g-xz-grid" style="margin-bottom:16px">' +
+       cardHtml('番茄全库改编深度', '平均每本改编部数逐期变化',
+                gailanPpbHtml(xz.quan_ku_ppb)) +
+       cardHtml('番茄头部本期追加改编', '两个榜单 Top10 内短剧+漫剧部数上升的作品',
+                gailanTopZengHtml(xz.fanqie_toubu_zengzhang)) +
+       '</div>';
+  /* ⚠ 副标题不许写名次范围（原「长期榜 · Top50 头部」是错的：
+     晋江长期榜就是 Top1000，Top50 是我们自己截断出来的）。
+     也不许写「前几期如何」这类需要额外核实的话 —— 期数由 ETL 给，写死会过期。 */
+  h += '<div class="g-xz-grid" style="margin-bottom:16px">' +
+       cardHtml('起点收藏榜本期新增签约', '全榜 · 两期都在榜的书',
+                gailanXinzengQianyueHtml(xz.qidian_xinzeng, 'qidian')) +
+       cardHtml('晋江积分榜本期新增签约', '全榜 · 两期都在榜的书',
+                gailanXinzengQianyueHtml(xz.jjwxc_xinzeng, 'jjwxc')) +
+       '</div>';
+
+  /* ── ③·五 番茄全库热度分层分布趋势（2026-09-14 新增，插在洞察之前）──
+     副标题把口径一次说清：单位、分档、共轴。脚注里还有「高档已放大」的声明，
+     那句是这张图诚实的代价，不许删。 */
+  var rf = ov.redu_fenceng;
+  if (rf) {
+    h += '<div style="margin-bottom:16px">' + cardHtml('番茄全库热度分层分布趋势',
+                  '按上线月份统计当月新上线作品部数，AI 漫剧与真人短剧共用同一纵轴；' +
+                  '热度取红果历史最高热度（非当月值）',
+                  reduFencengHtml(rf)) + '</div>';
+  }
+
+  /* ── ④ 概览洞察 ── */
+  h += cardHtml('概览洞察', '跨平台结论',
     insightsHtml(ov.insights) ||
-    '<div class="empty-box">' + esc(ov.placeholder || '总览文案待补充。') + '</div>');
+    '<div class="empty-box">' + esc(ov.placeholder || '概览文案待补充。') + '</div>');
 
-  return {
-    html: h,
-    bind: function () {
-      document.querySelectorAll('#main [data-goto]').forEach(function (n) {
-        n.onclick = function () { go(n.getAttribute('data-goto')); };
-      });
-    }
-  };
+  /* 概览页全是静态内容，没有表格/搜索/排序，bind 无需做任何事。
+     原先这里绑 [data-goto]（「各数据集概览」卡的「查看」按钮），该卡已删。 */
+  return { html: h, bind: function () {} };
 }
 
 /* ---------------- 大表懒加载 ----------------
