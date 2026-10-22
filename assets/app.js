@@ -300,8 +300,8 @@ function pageNotes(page) {
 
 /* 口径说明卡。
    tongJiPopYiNuoZou = true 时，「统计方式」行只留摘要，详情浮窗不在这里出 ——
-   给番茄改编全库用：它的详情讲的是「改编超预期/不及预期」判定，
-   用户 2026-09-07 要求挪到「改编表现分布」指标卡上，见 renderWwds。 */
+   ⚠ 2026-10-20 起番茄改编全库的 ⓘ 又回到口径卡了：原来挂浮窗的那张
+   「改编表现分布」指标卡已被删除（超预期判定整套清除），没别的地方可挂。 */
 function notesHtml(page, tongJiPopYiNuoZou) {
   var n = pageNotes(page);
   var rows = '';
@@ -345,6 +345,20 @@ function statCard(label, value, sub, subCls, labelHouZhui) {
   return '<div class="stat"><div class="l">' + esc(label) + (labelHouZhui || '') + '</div>' +
          '<div class="n">' + value + '</div>' +
          '<div class="s ' + (subCls || '') + '">' + (sub || '&nbsp;') + '</div></div>';
+}
+
+/* 双指标并列卡：一个卡里左右两栏，各自「小标题 + 大号数字」。
+   用于番茄改编全库的「有 AI 漫剧的书 / 有真人短剧的书」（2026-10-22 用户要求）。
+   ⛔ 这两个数是**并列关系**（一本书可以同时有 AI 漫剧和真人短剧，两者相加 ≠ 全集），
+     原先把后者写成前者的副标题（`statCard(..., '有真人短剧的书 8,116 本')`），
+     会被读成「AI 漫剧 21,187 本，其中真人短剧 8,116 本」—— 口径完全错了。
+   ⚠ 值参数是**原样 HTML**（与 statCard 的 value 同规矩，允许拼 <small> 单位）。 */
+function statCardDuo(aLabel, aVal, bLabel, bVal) {
+  return '<div class="stat stat-duo">' +
+         '<div class="duo-col"><div class="l">' + esc(aLabel) + '</div>' +
+         '<div class="n">' + aVal + '</div></div>' +
+         '<div class="duo-col"><div class="l">' + esc(bLabel) + '</div>' +
+         '<div class="n">' + bVal + '</div></div></div>';
 }
 
 /* 图表/内容卡片。
@@ -484,6 +498,77 @@ function miniColsHtml(rows, color, maxVal, unit, eWaiCls) {
            '</div>';
   }).join('') + '</div>' +
   (unit ? '<div class="mcols-unit">' + esc(unit) + '</div>' : '');
+}
+
+/* 单列竖柱 SVG，用于「题材改编热度」的两张榜。
+   rows = [{k, v, t}]；se = 柱色；unit = 纵轴说明。
+
+   ## ⛔⛔ 为什么是 SVG 而不是 div + CSS（2026-10-20 返工，别改回去）
+   第一版用 div 嵌套（`.mcol > .mcol-shuang > .mcol-track > .mcol-fill`），
+   柱高靠 `height: 百分比` 一层层传下来，**线上整张图不可见**。
+   根因：`.mcol-track` 原本靠 `flex:1` 在 **column** 方向撑高，放进
+   `.mcol-shuang`（flex **row**）后 flex:1 改成分配宽度、高度转由 align-items 决定，
+   于是「track 高度取决于内容、内容高度又是 track 的百分比」形成循环依赖。
+   补 `height:100%` 后仍然没显示（这条 flex 高度链太长太脆）。
+   ⇒ 改用 SVG：**坐标是绝对像素，不依赖任何父级高度**，
+     与本文件里 `lineChartHtml` / `reduFencengHtml` 同一套做法（都已线上验证）。
+   ⚠⚠ 那个 bug 的 HTML **完全正确**（柱子在、height 百分比也在），
+     所有"数元素"的断言都是绿的 —— 只有打开页面才看得见。
+     ⇒ 验这类图必须验「能不能显示」（量高度），而不只是「有没有生成」。
+
+   ## ⚠ 2026-10-20 从双列柱改为单列
+   原来一张图并排画「全量均热」+「前 N 本均热」两根柱，用户两次要求拆开：
+   并排柱逼着两个指标共用一套名次，而两榜实测有 6 个题材完全不重叠。
+   ⛔ 不许改回双列。两张榜各调一次本函数。
+
+   ⚠ 柱顶刻意**不写数值**：10 个类目的数字挤在一起没法读，精确值走 <title> 悬停。 */
+function miniColsDanHtml(rows, se, unit) {
+  if (!rows || !rows.length) return '';
+  var W = 680, H = 190, PL = 52, PR = 12, PT = 12, PB = 34;
+  var iw = W - PL - PR, ih = H - PT - PB;
+  var gw = iw / rows.length;
+  var bw = Math.min(26, gw * 0.52);
+
+  var maxV = 1;
+  rows.forEach(function (r) { if ((r.v || 0) > maxV) maxV = r.v; });
+  /* 纵轴上界取整到一个「好看的刻度」，避免 37,723,414 这种轴标 */
+  var step = Math.pow(10, String(Math.floor(maxV)).length - 1);
+  var top = Math.ceil(maxV / step) * step;
+  var Y = function (v) { return PT + ih - (v || 0) / top * ih; };
+
+  var g = '';
+  for (var t = 0; t <= 4; t++) {              // 横向网格线 + Y 轴刻度
+    var v = top / 4 * t, y = Y(v);
+    g += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - PR) +
+         '" y2="' + y.toFixed(1) + '" stroke="var(--line)" stroke-width="1"/>' +
+         '<text x="' + (PL - 7) + '" y="' + (y + 3.5).toFixed(1) +
+         '" text-anchor="end" font-size="10" fill="var(--ink-3)">' +
+         /* ⚠ wan(0) 返回「—」（它把 0 当"没有数据"）。Y 轴原点是真实的 0，
+            不是缺数据 ⇒ 这里单独写 '0'，否则轴底会显示一个莫名的破折号。 */
+         esc(v > 0 ? wan(v) : '0') + '</text>';
+  }
+  rows.forEach(function (r, i) {
+    var x = PL + i * gw + (gw - bw) / 2;
+    var hgt = (r.v || 0) / top * ih;
+    /* 至少 1px：0 值完全看不见时，读者分不清"是 0"还是"没这根柱" */
+    if (hgt < 1) hgt = 1;
+    g += '<rect x="' + x.toFixed(1) + '" y="' + (PT + ih - hgt).toFixed(1) +
+         '" width="' + bw.toFixed(1) + '" height="' + hgt.toFixed(1) +
+         '" fill="' + se + '" rx="2"/>';
+    g += '<text x="' + (PL + i * gw + gw / 2).toFixed(1) + '" y="' + (H - PB + 15) +
+         '" text-anchor="middle" font-size="10.5" fill="var(--ink-3)">' +
+         esc(r.k) + '</text>';
+    g += '<rect class="hit" x="' + (PL + i * gw).toFixed(1) + '" y="' + PT +
+         '" width="' + gw.toFixed(1) + '" height="' + ih +
+         '" fill="transparent"><title>' +
+         esc(r.k + '\n' + (r.t != null ? r.t : r.v)) + '</title></rect>';
+  });
+
+  var h = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="linechart" role="img">' +
+          g + '</svg>';
+  h += '<div class="legend"><span>鼠标悬停可看精确数值</span></div>';
+  if (unit) h += '<div class="mcols-unit">' + esc(unit) + '</div>';
+  return h;
 }
 
 /* ---------------- 表格通用引擎 ---------------- */
@@ -904,39 +989,91 @@ function renderFanqieBoard(page, snap) {
   return { html: h, bind: function () { bindTable(cfg); } };
 }
 
+/* ── 原著体量 × 改编热度 九宫格（2026-10-20，替掉「改编表现分布」指标卡）────────
+   行 = 原著累计阅读档，列 = 改编剧最高热度档，三档都按**名次比例** 15%/50%/35%。
+   格内给「本数 + 本档内占比」—— 用户要的就是「本档内占比」这个口径。
+
+   ⚠⚠ 底色按**本档内占比**深浅，不按绝对本数：行与行的书数差 3 倍
+     （阅读1档 3,912 本 vs 2档 13,038 本），按绝对数上色整行会被压成同一个色，
+     行间对比就没了。占比是行内归一化的，跨行可比。
+   ⛔ 不画「档位一致 / 原著更高 / 改编更高」三个汇总数：
+     实测后两者 25.5% vs 24.8% 几乎相等，是接近对称的结构、信息量低（MEMORY 红线）。
+   ⚠ 对角线加粗边框标出「两档一致」，读者一眼能看出偏离方向。 */
+function jiuGongSe(pct) {
+  /* 番茄橙系单色阶，0~65% 映射到透明度 0.06~0.92。
+     上限取 65% 不取 100%：实测最大格 64.8%，用 100 当分母会让所有格都偏浅。 */
+  var a = 0.06 + Math.min(1, (pct || 0) / 65) * 0.86;
+  return 'rgba(234, 88, 12, ' + a.toFixed(3) + ')';
+}
+function jiuGongHtml(jg) {
+  if (!jg || !jg.ge || !jg.ge.length) return '';
+  var dm = jg.dang_ming || ['前 15%', '中间 50%', '后 35%'];
+  /* 表头：左上角空格 + 三个热度档 */
+  var g = '<div class="jg-tbl">' +
+          '<div class="jg-jiao">原著累计阅读 ＼ 改编热度</div>' +
+          dm.map(function (d) { return '<div class="jg-th">热度 ' + esc(d) + '</div>'; }).join('');
+  jg.ge.forEach(function (pai, a) {
+    g += '<div class="jg-rh">阅读 ' + esc(dm[a]) + '<i>' +
+         num((jg.hang_he || [])[a]) + ' 本</i></div>';
+    pai.forEach(function (c, b) {
+      var tip = '原著阅读 ' + dm[a] + ' × 改编热度 ' + dm[b] + '\n' +
+                num(c.books) + ' 本，占该阅读档 ' + c.hang_pct + '%\n' +
+                '是「两者无关」时期望值的 ' + c.qi_wang_bei + ' 倍';
+      g += '<div class="jg-td' + (a === b ? ' jg-dui' : '') +
+           '" style="background:' + jiuGongSe(c.hang_pct) + '" title="' + esc(tip) + '">' +
+           '<b>' + num(c.books) + '</b><span>' + c.hang_pct + '%</span></div>';
+    });
+  });
+  g += '</div>';
+  /* ⛔ 这里不许写 markdown 的 ** 加粗：esc() 不渲染 markdown，会在页面上原样露出星号
+     （2026-09-15 线上事故同款）。要强调就用中文引号「」。 */
+  g += '<div class="legend"><span>格内上方为书数、下方为「占该阅读档的比例」（每行三格相加 = 100%）</span>' +
+       '<span>底色越深＝该阅读档的书越集中在这一热度档</span>' +
+       '<span>加框格＝两档一致</span></div>';
+  g += '<div class="g10-foot">' + esc(
+    '口径：原著「累计阅读」与改编剧「红果历史最高热度」各自按名次比例分三档（' +
+    dm.join(' / ') + '），同一本书只计一次，取其改编剧里热度最高的那部。' +
+    '共 ' + num(jg.books) + ' 本（阅读量与热度都有值的书）参与。' +
+    '本表只陈述两个名次档位的对应关系，不判定任何一本书的改编是否达到预期。') + '</div>';
+  return cardHtml('原著体量 × 改编热度 对应关系',
+    '行＝原著累计阅读名次档，列＝改编剧最高热度名次档；格内为本数与「占该阅读档的比例」',
+    g);
+}
+
+/* ⛔ 2026-10-20 已删除 jiuGongShu / jiuGongYiZu / jiuGongDanHtml 三个函数
+   （「黑马 / 落差」两组极端书单卡 + 它们专用的数值格式化）。
+   用户看过页面后要求去掉：「单本看不出来啥，你把这个信息放在表格明细里更好」。
+   ⇒ 改为表格新增「原著体量 × 改编热度」列（逐行显示区段）+ 对应筛选器，
+     每本书都能看到自己落在哪个区段，也能按区段筛选，比只列 8 本有用得多。
+   ⚠ 连带：原 jiuGongShu()（<1万显示原值、避免 wan() 把 3,051 显示成「0 万」）
+     也随之删除 —— 表格列显示的是区段文本，不显示数值，不再需要它。
+     若以后又要在卡里展示小量级数值，记得这个坑，别直接用 wan()。 */
 /* ---------------- 页面：番茄改编全库 ---------------- */
 function renderWwds(page, snap) {
   var s = snap.stats || {}, t = s.totals || {};
-  var perf = s.perf || {}, counts = perf.counts || {}, bands = perf.bands || [];
+  /* ⛔ 2026-10-20：s.perf 已从产物里移除（超预期判定整套清除），
+     原来的 perf / counts / bands 三个变量全部删掉。
+     体量分档现在是 s.tiliang_bands，只给口径浮窗的表格用（在 ETL 侧组装）。 */
   /* 月度趋势：与 ETL 洞察同口径，只展示当月上线量达标的月份 */
   var monthly = (s.monthly || []).filter(function (x) { return (x.ai + x.real) >= 300; });
 
-  /* 统计方式·详情讲的是「改编超预期/不及预期」判定 + 各档阈值，
-     所以浮窗不放口径卡，挪到下面「改编表现分布」卡的标题右边（用户 2026-09-07 要求）。
-     第二个参数 true = 让口径卡的「统计方式」行只留摘要、不出 ⓘ，避免同一份说明出现两次。 */
-  /* ⭐ 走 pageNotes 取当期阈值表，不许直接读 page.notes（那是最新一期，切期不变） */
-  var wwdsNotes = pageNotes(page);
-  var biaoXianPop = tongJiPopHtml(wwdsNotes.tong_ji_xiang, wwdsNotes.tong_ji_biao);
-  var h = notesHtml(page, true);
+  /* ⛔ 2026-10-20 删掉了「改编表现分布」指标卡（超预期/符合预期/不及预期 三个数）。
+     用户原话：「我们不应该自己下定义说某本书有没有超预期，太武断」。
+     替代品 = 下面的「原著体量 × 改编热度」九宫格 + 黑马/落差两组书单，
+     只陈述两个分位落在哪一档，不下价值判断。
+     ⚠ 连带改动：那张卡的标题上挂着「统计方式·详情」ⓘ 浮窗（2026-09-07 从口径卡挪去的），
+       卡一删浮窗就没地方挂了 ⇒ `notesHtml(page, true)` 的 true 必须去掉，
+       让 ⓘ 退回口径卡（它 2026-09-04 原本的位置）。否则口径说明会**彻底消失**。 */
+  var h = notesHtml(page);
 
-  h += '<div class="stats">';
+  /* ⚠ 2026-10-22 从 `stats` 改成 `stats stats-3`：2026-10-20 删掉「改编表现分布」卡后
+     本页只剩 3 张卡，却还挂在 4 列网格上 ⇒ 右侧一直空着 1/4，卡片也被挤窄。
+     「有 AI 漫剧 / 有真人短剧」做成左右两栏后更挤，必须用 3 列（起点/晋江页同款）。 */
+  h += '<div class="stats stats-3">';
   h += statCard('已改编小说', num(t.books), '至少 1 部改编作品上线');
   h += statCard('改编作品总数', num(t.dramas), '平均每本 ' + (t.parts_per_book || 0) + ' 部');
-  h += statCard('有 AI 漫剧的书', num(t.ai_books), '有真人短剧的书 ' + num(t.real_books) + ' 本');
-  /* 副标题带占比（用户 2026-09-11 要求）。
-     ⚠ 这三档是等频分位算出来的，占比天然近似恒定（实测三期环比全是 +1.4%）——
-       用户已知情并明确接受「就算占比一直不变也没关系」。不要再"优化"成环比。
-     分母用三档计数之和，不用 t.books —— 参与判定的书数（有热度）少于已改编书数，
-     用 t.books 会让三档占比加不到 100%。 */
-  var perfSum = (counts['超预期'] || 0) + (counts['符合预期'] || 0) + (counts['不及预期'] || 0);
-  h += statCard('改编表现分布',
-                (counts['超预期'] || 0) + ' / ' + (counts['符合预期'] || 0) + ' / ' + (counts['不及预期'] || 0),
-                perfSum
-                  ? '超预期 ' + pct(counts['超预期'] || 0, perfSum) +
-                    ' / 符合预期 ' + pct(counts['符合预期'] || 0, perfSum) +
-                    ' / 不及预期 ' + pct(counts['不及预期'] || 0, perfSum)
-                  : '超预期 / 符合预期 / 不及预期',
-                '', biaoXianPop);
+  h += statCardDuo('有 AI 漫剧的书', num(t.ai_books),
+                   '有真人短剧的书', num(t.real_books) + '<small> 本</small>');
   h += '</div>';
 
   h += insightsHtml(snap.insights);
@@ -996,70 +1133,79 @@ function renderWwds(page, snap) {
      只有两张都在时才并列；单张时并列会拉成半宽显得残缺。 */
   var wwdsCharts = [];
 
-  if (bands.length) {
-    /* 原先是一张 6 列阈值表，信息密但很丑。改成竖柱看各档中位热度，
-       精确阈值用一行小字说明，需要精确数值的场景本来也不多。
-       分位名（p90/p25）从数据里读，不写死 —— ETL 调阈值时页面自动跟随。 */
-    var qHi = 'p' + Math.round((bands[0].over_q || 0.9) * 100);
-    var qLo = 'p' + Math.round((bands[0].under_q || 0.25) * 100);
-    var body1 = miniColsHtml(bands.map(function (x) {
-      return { k: '档 ' + x.band, v: x.heat_mid, t: wan(x.heat_mid) };
-    }), 'var(--fanqie)', null, '纵轴为该档「改编剧最高热度」中位数（万）', 'mcols-xiao');
-    body1 += '<div class="thresh-note">' + bands.map(function (x, i) {
-      /* 区间写成开/闭区间，不写「min–max」：用户 2026-09-07 指出
-         「档3（1,022,869–55,013,047）」会让听众误以为最高档之外还有书。
-         上界一律取「上一档的 cum_read_max」，而不是本档的 min —— 两者之间
-         有采样空隙（如 1,022,658 vs 1,022,869），用 min 会让区间对不上。 */
-      var qu = (i < bands.length - 1)
-        ? '≤ ' + num(x.cum_read_max)
-        : '> ' + num(bands[bands.length - 2].cum_read_max);
-      return '<span><b>档 ' + x.band + '</b>　累计阅读 ' + qu +
-             '　共 ' + num(x.books) + ' 本　超预期线（' + qHi + '） ' +
-             wan(x.heat_over) + '　不及预期线（' + qLo + '） ' + wan(x.heat_under) + '</span>';
-    }).join('') + '</div>';
-    wwdsCharts.push(cardHtml('改编表现判定阈值（按累计阅读分 ' + bands.length + ' 档）',
-                  '同档内比较：该书改编剧最高热度高于本档 ' + qHi + ' 记为超预期，低于 ' +
-                  qLo + ' 记为不及预期，介于两者之间为符合预期',
-                  body1, 'ka-zhuzhuang'));
-  }
+  /* ⛔ 2026-10-20 已删除「改编表现判定阈值（按累计阅读分 N 档）」图卡。
+     它画的是各档「超预期线 p90 / 不及预期线 p25」—— 整套超预期判定已被用户要求清除
+     （「我们不应该自己下定义说某本书有没有超预期，太武断」）。
+     ⚠ 原著体量分档本身没删（`tiliang_bands`），它还在给「全库改编开发深度」洞察
+       提供头部/中部/尾部的平均改编部数；分界线收进了口径卡 ⓘ 浮窗的表格里，
+       不再单独占一张图。⛔ 不许把阈值图加回来。 */
 
-  var ce = s.cat_eff || [];
-  if (ce.length) {
-    /* 只画效率高的题材（用户要求）：看"表现最差的题材"没有决策价值，
-       而且容易被读成对该题材的否定判断。原先是左右双栏横条，现在单张迷你竖柱。 */
-    /* 全局基准 = 1 - 超预期分位（p90 → 约 10%）。不要写死数字，
-       否则 ETL 调阈值后这里就变成错的。 */
-    var overQ = (bands[0] && bands[0].over_q) || 0.9;
-    var base = Math.round((1 - overQ) * 100);
-    var body2 = miniColsHtml(ce.slice(0, 8).map(function (r) {
-      return { k: r.category, v: r.over_pct, t: r.over_pct + '%' };
-    }), 'var(--up)', null,
-       '纵轴为该题材中改编表现「超预期」的书占比（%），全局基准约 ' + base + '%',
-       'mcols-xiao');
-    /* 副标题必须说清分母：全库题材上百个，图上只画 8 个，
+  /* 题材改编热度（2026-09-25 替掉「超预期占比」；2026-10-20 拆成**两张独立榜**）。
+     ⛔ 用户明确：不再讲「超预期占比」—— 那是我们自己下的定义，对单本书说
+        "没达预期"太武断。改讲平台给的客观数值。
+     ⛔ 不显示两者的倍数（用户：增加了无用信息量）。
+     ⚠⚠ **不许改回单张并排双列柱图**（用户两次要求拆开）：
+        并排柱逼着两个指标共用一套名次，而实测两榜**有 6 个题材完全不重叠** ——
+        「整体水位高」和「天花板高」根本是两批题材，合成一张图等于把两个
+        不同的业务问题混在一起。
+     ⚠ 两榜各自的排序都来自 ETL（quan_bang / tou_bang 已排好），前端不许重排。 */
+  var ch = s.cat_heat || {};
+  var chQuan = ch.quan_bang || [], chTou = ch.tou_bang || [];
+  if (chQuan.length && chTou.length) {
+    var chTopN = ch.top_n || 20;
+    /* 副标题必须说清分母：全库题材上百个，图上只画前 N 个，
        不写「从多少个里挑的」听众会以为只有这几个题材。数字从 stats 取，不写死。 */
-    var ceTotal = s.cat_eff_total || ce.length;
-    var ceBooks = s.cat_eff_books || 0;
-    var fenMu = '共 ' + ceTotal + ' 个题材参与排名';
-    if (ceBooks && s.totals && s.totals.books) {
-      fenMu += '，覆盖全库 ' + (ceBooks / s.totals.books * 100).toFixed(1) + '% 的书';
+    var fenMu = '共 ' + (ch.total || 0) + ' 个题材参与排名';
+    if (ch.books && s.totals && s.totals.books) {
+      fenMu += '，覆盖全库 ' + (ch.books / s.totals.books * 100).toFixed(1) + '% 的书';
     }
-    wwdsCharts.push(cardHtml('题材改编效率（表现较好的题材）',
-                  '超预期 = 该书改编剧最高热度高于同体量档 p' + Math.round(overQ * 100) +
-                  '；仅统计样本 150 本以上的题材，' + fenMu + '，图上按超预期占比取前 8',
-                  body2, 'ka-zhuzhuang'));
+    var chMin = ch.min_books || 150;
+    wwdsCharts.push(cardHtml('题材改编热度 · 整体水位',
+      '该题材全部已改编书的平均最高热度；仅统计样本 ' + chMin + ' 本以上的题材，' +
+      fenMu + '，按该指标取前 ' + chQuan.length,
+      miniColsDanHtml(chQuan.map(function (r) {
+        return { k: r.category, v: r.quan_jun,
+                 t: wan(r.quan_jun) + '（全量 ' + num(r.books) + ' 本）' };
+      }), 'var(--fanqie)', '纵轴为该题材全部已改编书的平均最高热度')));
+    wwdsCharts.push(cardHtml('题材改编热度 · 天花板',
+      '该题材热度最高的前 ' + chTopN + ' 本的平均热度；同样的题材池、同样的门槛，' +
+      '按该指标取前 ' + chTou.length + ' —— 与左图不是同一批题材',
+      miniColsDanHtml(chTou.map(function (r) {
+        return { k: r.category, v: r.tou_jun,
+                 t: wan(r.tou_jun) + '（取前 ' + r.top_n_shi + ' 本，该题材共 ' +
+                    num(r.books) + ' 本）' };
+      }), '#7C2D12', '纵轴为该题材热度前 ' + chTopN + ' 本的平均最高热度')));
   }
 
-  /* 两张都在才并列；只剩一张时并列会被 auto-fit 拉成半宽显得残缺，直接整宽输出。 */
+  /* 两张都在才并列；只剩一张时并列会被 auto-fit 拉成半宽显得残缺，直接整宽输出。
+     ⚠ 删掉阈值图后这里通常只剩「题材改编热度水位」一张 ⇒ 走整宽分支。
+       判断保留着：以后再加图时不用改这段。 */
   if (wwdsCharts.length === 2) h += '<div class="grid2">' + wwdsCharts.join('') + '</div>';
   else h += wwdsCharts.join('');
+
+  /* 原著体量 × 改编热度 九宫格 + 黑马/落差书单（2026-10-20，替掉「改编表现分布」卡）。
+     两张卡刻意**各自整宽**不并列：矩阵只有 4 行、书单有 2×8 行，并列会差 4 倍高。 */
+  /* ⛔ 2026-10-20 删掉了 jiuGongDanHtml（「黑马 / 落差」两组极端书单卡）。
+     用户：「单本看不出来啥，你把这个信息放在表格明细里更好」。
+     ⇒ 改为表格新增「原著体量 × 改编热度」列（逐行显示区段）+ 对应筛选器。 */
+  h += jiuGongHtml(s.jiu_gong);
+
+  /* 「原著体量 × 改编热度」区段码 → 可读文案的查表。
+     ⚠ rows 里每行只存 2 字符的区段码（如 "31"），可读中文只在 duan_all 里存 9 份 ——
+       第一版把中文存进每一行，26,262 行 × 6 期让 track_data.json 从 5.0 MB
+       涨到 24.3 MB（实测）。⛔ 别再把文案塞回 rows。
+     ⚠ 文案仍然**只来自 ETL**（duan_all 由 build_jiu_gong_ge 生成），
+       前端只做查表，不拼口径 —— 分档比例改了页面自动跟随。 */
+  var jgDuanAll = (s.jiu_gong || {}).duan_all || [];
+  var jgDuanMap = {};
+  jgDuanAll.forEach(function (d) { jgDuanMap[d.v] = d; });
 
   var cfg = {
     key: page.key + '@' + (snap.date || ''),
     rows: snap.rows || [],
     defaultSort: { k: 'max_heat', dir: 'desc' },
     /* 排序维度显式给出：默认「改编剧最高热度」，但那个指标同时也是超预期判定依据，
-       所以前几页必然全是超预期。想看「大 IP 的改编成绩如何」应切到「累计阅读」。 */
+       所以前几页必然是热度档最高的那批。想看「大 IP 的改编成绩如何」应切到「累计阅读」。 */
     sortOptions: [
       { k: 'max_heat', dir: 'desc', label: '按改编剧最高热度' },
       { k: 'cum_read', dir: 'desc', label: '按原著累计阅读' },
@@ -1069,20 +1215,26 @@ function renderWwds(page, snap) {
     searchKeys: ['name', 'author', 'category'],
     searchHint: '书名 / 作者 / 题材',
     rowId: function (r) { return r.name; },
+    /* ⛔ 原「改编表现超预期 / 不及预期」两个筛选项已于 2026-10-20 删除
+       （整套超预期判定被清除）。换成 9 个「原著体量 × 改编热度」区段，
+       与新列一一对应，想看「黑马」直接筛「后 35% × 前 15%」那一项。
+       ⚠ 选项来自 ETL 的 duan_all（带每段书数），**前端不许自己拼 9 个字符串** ——
+         分档比例改了就会对不上。value 用 'jg:31' 这种带前缀的紧凑值，
+         避免和 real/ai/both 撞名。 */
     filters: [
       { v: '', label: '全部作品形态' },
       { v: 'real', label: '有真人短剧' },
       { v: 'ai', label: '有 AI 漫剧' },
-      { v: 'both', label: '真人 + AI 都有' },
-      { v: 'over', label: '改编表现超预期' },
-      { v: 'under', label: '改编表现不及预期' }
-    ],
+      { v: 'both', label: '真人 + AI 都有' }
+    ].concat(jgDuanAll.map(function (d) {
+      return { v: 'jg:' + d.v,
+               label: '体量×热度：' + d.label + '（' + num(d.books) + ' 本）' };
+    })),
     filterFn: function (r, f) {
       if (f === 'real') return r.real_cnt > 0;
       if (f === 'ai') return r.ai_cnt > 0;
       if (f === 'both') return r.real_cnt > 0 && r.ai_cnt > 0;
-      if (f === 'over') return r.perf === '超预期';
-      if (f === 'under') return r.perf === '不及预期';
+      if (f && f.indexOf('jg:') === 0) return r.jiu_gong_v === f.slice(3);
       return true;
     },
     cols: [
@@ -1095,8 +1247,20 @@ function renderWwds(page, snap) {
       { k: 'read14', label: '14天在读', w: '88px', type: 'num', dim: true },
       { k: 'real_cnt', label: '真人短剧', w: '68px', type: 'num' },
       { k: 'ai_cnt', label: 'AI 漫剧', w: '66px', type: 'num' },
-      { k: 'perf', label: '改编表现', w: '82px', type: 'text', sortable: false,
-        render: function (r) { return r.perf ? '<span class="tag perf-' + esc(r.perf) + '">' + esc(r.perf) + '</span>' : '—'; } }
+      /* ⛔ 原「改编表现」列（超预期/符合预期/不及预期标签）已于 2026-10-20 删除。
+         用户：「我们不应该自己下定义说某本书有没有超预期，太武断」。
+         ⇒ 换成下面这列：只说这本书的两个名次档位，不下判断。
+         ⚠ 文案与区段值都来自 ETL（jiu_gong_duan / jiu_gong_quan），
+           前端**不许自己拼** —— 分档比例改了就会对不上（口径只能来自 ETL）。
+         ⚠ 列宽给 132px：文本形如「前 15% × 中间 50%」，82px 会被 ellipsis 吃掉。 */
+      { k: 'jiu_gong_v', label: '原著体量 × 改编热度', w: '132px', type: 'text',
+        sortable: false,
+        render: function (r) {
+          var d = jgDuanMap[r.jiu_gong_v];
+          if (!d) return '—';
+          return '<span class="tag jg-tag" title="' + esc(d.quan || '') + '">' +
+                 esc(d.label) + '</span>';
+        } }
     ],
     detail: function (r) {
       var d = r.top_drama;
@@ -1120,6 +1284,140 @@ function renderWwds(page, snap) {
   };
   h += tableHtml(cfg);
   return { html: h, bind: function () { bindTable(cfg); } };
+}
+
+/* ── 影视动漫待签约专区（用户 2026-10-20 新增，起点收藏榜 / 晋江积分榜各一个）──
+   挑出「还没有影视/动画类改编披露、但体量够大」的头部 IP，供版权方当可洽谈清单。
+
+   ⛔⛔ 这是**筛选，不是评价**。文案一律中性：
+     不许写「被低估」「错过的机会」「尚未被发掘」之类 ——
+     平台未公开 ≠ 没签约（可能已签未披露），我们只能说"未检索到公开披露"。
+   ⚠ 两边口径不同，副标题必须各自写清：
+     · 起点 = 无影视/动画 + 总推荐 ≥ 门槛（门槛由 ETL 给，不写死）
+     · 晋江 = 积分榜前 N 名内，影视类签约一个都没有
+   ⚠ 现有改编类型要显示出来：很多书有出版/漫画/游戏签约，只是没影视动画，
+     不显示会让读者以为这些书完全没动静。 */
+/* 待签约专区当前选中的筛选档：页面 key -> 档 key。
+   ⚠ 本站没有 hash 路由，状态只能放模块级变量（切页/切快照后沿用，这是想要的）。 */
+var DQY_DANG = {};
+
+/* 取当前该用哪个档。⚠ 必须兜底回 ETL 给的默认档：
+   档的集合会随「名册在不在」变化，旧选择可能已经不存在了。 */
+function dqyDangNow(d, pageKey) {
+  var list = (d && d.dang) || [];
+  var want = DQY_DANG[pageKey];
+  for (var i = 0; i < list.length; i++) if (list[i].key === want) return list[i];
+  for (var j = 0; j < list.length; j++) if (list[j].key === d.mo_ren) return list[j];
+  return list[0] || null;
+}
+
+function daiQianYueHtml(d, plat, pageKey) {
+  var dang = dqyDangNow(d, pageKey);
+  if (!dang || !(dang.rows || []).length) return '';
+  var shiQi = plat === 'qidian';
+  var list = (d.dang || []);
+  var fu;
+  if (shiQi) {
+    /* ⚠ 入选条件随「大神作家名册」是否就位而变，副标题必须跟着变 ——
+       名册还没抓时**不许**暗示已包含作者等级（you_ming_ce 由 ETL 给）。 */
+    fu = '未检索到「' + (d.pai_chu || []).join(' / ') + '」改编披露，且';
+    if (d.you_ming_ce) {
+      fu += '满足「总推荐 ≥ ' + wan(d.men_jian) + '」或「作者在起点大神/白金名册（' +
+            num(d.ming_ce_ren) + ' 人）中」任一条件；';
+    } else {
+      fu += '总推荐 ≥ ' + wan(d.men_jian) + '；';
+    }
+    fu += '本期共 ' + num(d.zong) + ' 本（自 ' + num(d.fen_mu) +
+          ' 本已采到改编字段的书中筛出）。' +
+          /* ⭐ 说清楚「下表」是哪一档的，否则读者会把当前档的 20 本
+             当成 353 本里的前 20（两档排序不同，那是错的）。 */
+          '下表为「' + esc(dang.label) + '」（共 ' + num(dang.zong) +
+          ' 本）按总推荐降序的前 ' + dang.rows.length;
+  } else {
+    fu = '积分榜前 ' + d.fan_wei + ' 名中，未检索到「' + (d.pai_chu || []).join(' / ') +
+         '」任一签约形式；本期共 ' + num(d.zong) + ' 本，下表按榜位列出前 ' +
+         dang.rows.length;
+  }
+
+  /* 筛选器：只在**多于一档**时渲染。
+     ⛔ 单档时不许画（一个选项的控件是废控件，晋江侧就是单档）。 */
+  var qie = '';
+  if (list.length > 1) {
+    qie = '<div class="dqy-dang">';
+    list.forEach(function (x) {
+      qie += '<button type="button" class="dqy-dang-b' +
+             (x.key === dang.key ? ' on' : '') + '" data-dqy="' + esc(x.key) + '">' +
+             esc(x.label) + '<i>' + num(x.zong) + '</i></button>';
+    });
+    qie += '</div>';
+  }
+
+  /* ⚠ 晋江没有「总推荐」列 ⇒ 加 .dqy-wu-tui 切成 5 列模板。
+     ⛔ 不要靠页面级祖先 class 区分（本站没有 .pg-xxx 这种东西）。 */
+  var g = qie + '<div class="dqy-tbl' + (shiQi ? '' : ' dqy-wu-tui') + '">' +
+          '<div class="dqy-tr dqy-th">' +
+          '<div>#</div><div>书名</div><div>作者</div><div>题材</div>' +
+          (shiQi ? '<div class="dqy-r">总推荐</div>' : '') +
+          '<div>现有改编披露</div></div>';
+  dang.rows.forEach(function (r) {
+    /* 作者等级角标：用户 2026-10-21 要求写明是【白金】还是【大神】，
+       ⛔ 不要再退回笼统的「神」—— 两档含义不同（白金是从大神晋升上来的）。
+       ⚠ deng_ji 为空＝不在名册里，什么都不画（⛔ 不许兜底成「大神」）。 */
+    var dj = r.deng_ji || '';
+    var jiao = dj ? '<b class="dqy-ds dqy-ds-' +
+               (dj === '白金' ? 'bj' : 'ds') + '">' + esc(dj) + '</b>' : '';
+    g += '<div class="dqy-tr">' +
+         '<div><span class="rankno">' + (r.rank || '—') + '</span></div>' +
+         '<div class="dqy-m" title="' + esc(r.name) + '">' + esc(r.name) + '</div>' +
+         '<div class="dqy-d" title="' + esc(r.author) +
+         (dj ? '（起点' + esc(dj) + '作家）' : '') + '">' + esc(r.author) +
+         jiao + '</div>' +
+         '<div class="dqy-d">' + esc(r.tag || '—') + '</div>' +
+         (shiQi ? '<div class="dqy-r">' + wan(r.total_rec_num) + '</div>' : '') +
+         '<div class="dqy-d">' +
+         ((r.tags || []).length ? esc((r.tags || []).join('、')) : '<i>暂无任何改编披露</i>') +
+         '</div></div>';
+  });
+  g += '</div>';
+  /* ⛔ 免责声明不许删：这张表最容易被读成「这些 IP 没人要」。 */
+  var jiaoWen = '口径：改编信息来自平台公开披露，显示为无仅表示平台未公开，' +
+             '不代表未授权或未改编 —— 本表是「公开渠道未见影视动漫签约」的清单，' +
+             '不是「版权仍可售」的结论，洽谈前请以权利方确认为准。';
+  if (shiQi) {
+    jiaoWen += '总推荐为起点站内累计推荐票数，随时间只增不减，不同年代作品不完全可比。';
+    if (d.you_ming_ce) {
+      jiaoWen += '作者名后标【白金】【大神】的在起点同名名册中，本期 ' + num(d.da_shu) +
+              ' 本命中该名册、其中 ' + num(d.jin_kao_da) + ' 本是仅凭作者等级入选（推荐未达门槛）。' +
+              '名册为一次性采集、长期不随周跑更新。' +
+              /* ⚠ 两档会重叠，不说清楚读者会把两个数相加 */
+              '两档存在重叠（既达推荐门槛、作者又在名册），合计本数为两档并集。';
+    }
+  }
+  g += '<div class="g10-foot">' + esc(jiaoWen) + '</div>';
+  /* ⚠ 这里**只返回卡片本身**，外层的 #dqyWrap 容器由调用方套 ——
+     切档时用 `wrap.innerHTML = daiQianYueHtml(...)` 替换内容即可，
+     不需要 outerHTML 那种把容器自己换掉的写法（容器一换，引用就失效）。 */
+  return cardHtml('影视动漫版权待签约重点 IP', fu, g);
+}
+
+/* 绑定专区筛选器。⚠ 只替换专区容器的内容，**不重渲染整页** ——
+   整页重渲染会把下方主表的搜索词/页码/排序全部重置（用户正在看表时切档就炸）。
+   ⚠ 用 `元素.querySelectorAll(...).forEach` —— 本站**没有** qsa() 这类 helper，
+     写之前先 grep 确认（臆造 helper / class 是本项目踩过的坑）。 */
+function bindDaiQianYue(d, plat, pageKey) {
+  var wrap = document.getElementById('dqyWrap');
+  if (!wrap) return;
+  wrap.querySelectorAll('.dqy-dang-b').forEach(function (b) {
+    b.onclick = function () {
+      DQY_DANG[pageKey] = b.getAttribute('data-dqy');
+      var xin = daiQianYueHtml(d, plat, pageKey);
+      if (!xin) return;
+      wrap.innerHTML = xin;
+      /* ⚠ 换完必须重新绑：innerHTML 一写，旧按钮节点连同监听一起没了。
+         漏了这步 → 第一次切能用、第二次点没反应，而且**不报错**。 */
+      bindDaiQianYue(d, plat, pageKey);
+    };
+  });
 }
 
 /* ---------------- 页面：起点 / 晋江 ---------------- */
@@ -1201,6 +1499,14 @@ function renderCopyrightBoard(page, snap) {
      两库交集 50/50 关联正确），所以这张卡在该页是**常驻**空卡，毫无信息量。
      「整榜零签约」这件事已由 lib_insight.no_signing_insight() 的洞察卡完整解释。
      不要再加回来。 */
+
+  /* 影视动漫待签约专区（用户 2026-10-20 新增，2026-10-21 加筛选器）。
+     只在两个长期榜页出现。⚠ 第 3 参传页面 key：筛选档的选择要按页记，
+     起点和晋江各自独立（晋江目前只有单档、不画按钮）。
+     ⚠ 外层 #dqyWrap 是切档时的替换目标，**不能省** —— 没有它 bindDaiQianYue
+       找不到容器，按钮点了没反应且不报错。 */
+  var dqyHtml = daiQianYueHtml(s.dai_qian_yue, plat, page.key || CUR);
+  if (dqyHtml) h += '<div id="dqyWrap">' + dqyHtml + '</div>';
 
   var cols = [
     { k: 'rank', label: '#', w: '40px', type: 'num',
@@ -1290,7 +1596,14 @@ function renderCopyrightBoard(page, snap) {
          '不计入分母，也不代表它们没有改编。该榜目前只采集过一期' +
          '（改编详情分 2 天跑完，属同一期），因此暂无历史快照可切换。</div>';
   }
-  return { html: h, bind: function () { bindTable(cfg); } };
+  return {
+    html: h,
+    bind: function () {
+      bindTable(cfg);
+      /* ⚠ 专区筛选器也要绑 —— 漏了按钮点了没反应、而且**不报错**。 */
+      bindDaiQianYue(s.dai_qian_yue, plat, page.key || CUR);
+    }
+  };
 }
 
 /* ---------------- 页面：概览 ----------------
@@ -1340,7 +1653,15 @@ function gailanLeiBiao(b) {
       if (!seen[t]) { seen[t] = true; out.push(t); }
     });
   });
-  return out;
+  /* ⛔ 列序是口径，只能来自 ETL 的 `lei_xu`（起点两榜用户 2026-09-15 定了固定顺序）。
+     按数据出现顺序排会随样本天天跳列，读者每期都要重新找列。
+     名单外的新类型（上游新增）追加在后 —— 不许因为不在名单里就丢掉。 */
+  var xu = b.lei_xu || [];
+  if (!xu.length) return out;
+  var inXu = [], qiTa = [];
+  xu.forEach(function (t) { if (seen[t]) inXu.push(t); });
+  out.forEach(function (t) { if (xu.indexOf(t) < 0) qiTa.push(t); });
+  return inXu.concat(qiTa);
 }
 
 /* ① 单个榜的 Top10 明细卡。
@@ -1399,8 +1720,23 @@ function gailanHeadHtml(b, ge, grid) {
   var h = '<div>#</div>' +
           '<div class="g10-shu">书名<i>' + (isFanqie ? '单位：部' : '签约') + '</i></div>';
   if (isFanqie) {
+    /* 「其他」这一列到底装了什么，光看列名猜不出来 —— 挂一个 ⓘ 浮窗说明
+       （用户 2026-09-15：要的是和其他卡片一样的圈里 i，不是列头下面一行小字）。
+       ⛔ 具体类型只能来自 ETL 的 `qita_zhu`，前端不许写死：
+          上游哪天加第三类，写死的文案就是错的。
+       ⛔ 按用户 09-07 定的原则：ⓘ 旁边不许再带提示文字，说明全部收进浮窗。 */
+    var zhu = b.qita_zhu || '';
+    var zhuPop = zhu
+      ? popKeHtml(
+          '<p class="pop-p">「其他」= 番茄 App 改编板块内' +
+          '<b>短剧、漫剧之外</b>的改编作品，本期共出现这些类型：' +
+          esc(zhu) + '。</p>' +
+          '<p class="pop-p">单位：部（同一本书可有多部）。' +
+          '构成随上游而变，这里按当期实际出现的类型列出。</p>',
+          '「其他」列的口径说明')
+      : '';
     ['短剧', '漫剧', '其他'].forEach(function (t) {
-      h += '<div class="g10-lei">' + t + '</div>';
+      h += '<div class="g10-lei">' + t + (t === '其他' ? zhuPop : '') + '</div>';
     });
   } else {
     ge.forEach(function (t) {
@@ -1424,9 +1760,13 @@ function gailanTop10Card(b) {
   var grid = gailanGrid(b.platform, ge);
 
   /* 长类型名改横排后总宽可能超过卡片（晋江 Top10 实测 14 列 ≈ 1.3k px），
-     外层 .g10-scroll 给横向滚动条，表本身用 min-width 撑住不被压扁。 */
-  var body = '<div class="g10-scroll"><div class="g10-tbl" style="min-width:' +
-             gailanZuiXiao(b.platform, ge) + 'px">' + gailanHeadHtml(b, ge, grid);
+     外层 .g10-scroll 给横向滚动条，表本身用 min-width 撑住不被压扁。
+     ⛔ 但**番茄卡不套 .g10-scroll**：它只有 3 个 46px 固定列，永远不溢出；
+        而 .g10-scroll 是 `overflow-x:auto + overflow-y:hidden`，会把「其他」列头
+        那个 ⓘ 的浮窗**裁掉**（与 sticky 表头那条坑同一个祖先 overflow 问题）。 */
+  var tbl = '<div class="g10-tbl" style="min-width:' +
+            gailanZuiXiao(b.platform, ge) + 'px">' + gailanHeadHtml(b, ge, grid);
+  var body = isFanqie ? tbl : '<div class="g10-scroll">' + tbl;
   rows.forEach(function (r) {
     var cells = isFanqie
       ? ['duanju', 'manju', 'qita'].map(function (k) {
@@ -1446,7 +1786,7 @@ function gailanTop10Card(b) {
             '<div class="cell name" title="' + esc(r.name) + '">' + esc(r.name) + '</div>' +
             cells + '</div>';
   });
-  body += '</div></div>';
+  body += isFanqie ? '</div>' : '</div></div>';
 
   /* 脚注：口径 + 两个日期。番茄巅峰榜实测榜单日与改编采集日能差 9 天，
      只标一个会让读者以为是同一天的数据。 */
@@ -1485,8 +1825,13 @@ function gailanFenbuCard(f) {
   });
   var body = barsHtml(rows, color);
   var foot = f.kou_jing + '。';
+  /* 类目全量列出、按数值降序（用户 2026-09-24：晋江 32 类不许只画前 8）。
+     ⚠ 仍保留「> 」这个分支：ETL 现在不截断，但万一以后又加了截断，
+       这里会自动把「你看到的是删节版」说出来，不会静默骗人。 */
   if (f.lei_mu_zong > xiang.length) {
     foot += '共 ' + f.lei_mu_zong + ' 类，图示数量前 ' + xiang.length + ' 类。';
+  } else if (xiang.length > 1) {
+    foot += '共 ' + xiang.length + ' 类，已按数量从多到少全部列出。';
   }
   foot += '榜单日 ' + esc(f.bangdan_ri || '—') + '，改编采集日 ' + esc(f.caiji_ri || '—') + '。';
   if (f.qi_shu < 2) foot += '该榜目前仅 ' + f.qi_shu + ' 期，暂无法与历史对比。';
@@ -1494,27 +1839,72 @@ function gailanFenbuCard(f) {
   return cardHtml(f.label, '长期榜 · 改编分布（单位：' + (f.dan_wei || '') + '）', body);
 }
 
-/* ③ 全库改编深度逐期（C1）。
-   ⚠ 刻意用横条不用折线：只有 6 期、且量级差只有 0.2 部，折线会把 2.1→2.3
-      画成陡坡，视觉上夸大变化。横条按绝对值等比，读者自己看得出"缓慢上升"。 */
-function gailanPpbHtml(ppb) {
+/* ③ 改编深度逐期（C1）：全库 vs 头部（累计阅读前 15%，与九宫格同一个口径）并排。
+   ⚠ 刻意用横条不用折线：只有 6 期、且全库量级差只有 0.2 部，折线会把 2.2→2.4
+      画成陡坡，视觉上夸大变化。横条按绝对值等比，读者自己看得出"缓慢上升"。
+   ⭐ 2026-09-25 加第二根「头部」条：用户说全库 2.2~2.4 趋势不明显。
+      头部同期 3.56 → 4.33，斜率明显更陡，并排立刻看得出差异。
+   ⚠ 2026-10-22 头部由「前 25%」收到「前 15%」（用户要求与九宫格统一），
+      比例**从 ETL 的 tou_bili 读**，⛔ 前端不许写死百分比。
+   ⚠ 两根条**共用同一个 max**（取两者的最大值），否则各自归一化后
+      头部和全库的条长一样长，"头部更深"这个结论就被归一化抹掉了。
+   ⚠ 头部字段可能缺失（本次改动之前产出的老快照没有 tou_ppb）——
+      缺失时只画全库那一根，不画 undefined 长度的条。 */
+var PPB_SE_QUAN = 'var(--fanqie)';          // 全库：番茄橙
+var PPB_SE_TOU = '#7C2D12';                 // 头部：同色系更深（与热度分层图高档同一个深棕橙）
+/* 头部比例文案（"15%"）—— ⛔ 百分比只能来自 ETL 的 tou_bili（= THRESHOLDS.jiu_gong_qie[0]），
+   前端写死过一次：原来直接写「前 25%」，而九宫格用 15%，同一页两个「头部」不是同一批书。
+   取**最后一个有该字段的期**（最新期），拿不到返回 null 由调用方显 '—'。 */
+function touBuBiliTxt(list) {
+  var r = null;
+  (list || []).forEach(function (x) {
+    if (x && x.tou_bili != null) r = x.tou_bili;
+  });
+  return r == null ? null : Math.round(r * 100) + '%';
+}
+/* ⭐ 2026-10-20 改成**两张独立小图左右并列**（用户要求），不再是一张卡里叠两根条。
+   `naYi` = 'quan' 画全库、'tou' 画头部。
+   ⚠⚠ 两张图**必须共用同一个 max**（取全库与头部的全局最大值），否则各自归一化后
+     两张图看起来一样长，「头部深度明显更高」这个结论会被归一化抹掉 ——
+     那正是用户加头部这根线的全部目的。所以 max 在函数内按两个字段一起算，
+     跟 naYi 无关。 */
+function gailanPpbHtml(ppb, naYi) {
+  var shiTou = naYi === 'tou';
   if (!ppb || !ppb.length) {
     return '<div class="g-xz-none">番茄改编全库暂无可用期次，无法显示深度趋势。</div>';
   }
-  var max = Math.max.apply(null, ppb.map(function (x) { return x.ppb; }).concat([1]));
+  if (shiTou && !ppb.some(function (x) { return x.tou_ppb != null; })) {
+    /* 老快照没有 tou_ppb。画不出来就说清楚，不画 undefined 长度的条。 */
+    return '<div class="g-xz-none">本期数据未包含头部改编深度，无法显示该趋势。</div>';
+  }
+  var max = Math.max.apply(null, ppb.map(function (x) {
+    return Math.max(x.ppb || 0, x.tou_ppb || 0);
+  }).concat([1]));
+  var se = shiTou ? PPB_SE_TOU : PPB_SE_QUAN;
   var h = '<div class="g-ppb">' + ppb.map(function (x, i) {
+    var v = shiTou ? x.tou_ppb : x.ppb;
     return '<div class="g-ppb-row' + (i === ppb.length - 1 ? ' now' : '') + '">' +
       '<div class="rq">' + esc((x.ri || '').slice(5)) + '</div>' +
       '<div class="bar-track"><div class="bar-fill" style="width:' +
-      (x.ppb / max * 100).toFixed(1) + '%;background:var(--fanqie)"></div></div>' +
-      '<div class="vv">' + x.ppb + ' 部/本</div></div>';
+      ((v || 0) / max * 100).toFixed(1) + '%;background:' + se + '"></div></div>' +
+      '<div class="vv">' + (v == null ? '—' : v + ' 部/本') + '</div></div>';
   }).join('') + '</div>';
   var tou = ppb[0], wei = ppb[ppb.length - 1];
-  h += '<div class="g10-foot">' + esc(
-    '平均每本改编部数 = 该期改编作品总部数 / 入库小说数。' +
-    tou.ri + ' 共 ' + num(tou.books) + ' 本 / ' + num(tou.dramas) + ' 部，' +
-    wei.ri + ' 共 ' + num(wei.books) + ' 本 / ' + num(wei.dramas) + ' 部。' +
-    '该口径覆盖番茄改编全库（非榜单头部）。') + '</div>';
+  var foot;
+  if (shiTou) {
+    foot = '头部 = 按原著累计阅读降序取前 ' + (touBuBiliTxt(ppb) || '—') +
+           ' 的书（本期 ' + num(wei.tou_books || 0) +
+           ' 本），改编部数口径与左图完全一致。' +
+           tou.ri + ' ' + (tou.tou_ppb == null ? '—' : tou.tou_ppb) + ' 部/本 → ' +
+           wei.ri + ' ' + (wei.tou_ppb == null ? '—' : wei.tou_ppb) + ' 部/本。' +
+           '两图共用同一横轴刻度，可直接比长短。';
+  } else {
+    foot = '平均每本改编部数 = 该期改编作品总部数 / 入库小说数。' +
+           tou.ri + ' 共 ' + num(tou.books) + ' 本 / ' + num(tou.dramas) + ' 部，' +
+           wei.ri + ' 共 ' + num(wei.books) + ' 本 / ' + num(wei.dramas) + ' 部。' +
+           '覆盖番茄改编全库，非榜单头部。';
+  }
+  h += '<div class="g10-foot">' + esc(foot) + '</div>';
   return h;
 }
 
@@ -1740,7 +2130,10 @@ function gailanXinzengQianyueHtml(x, plat) {
   });
   h += '</div></div>';
   h += '<div class="g10-foot">' + esc(
-    '统计范围：该榜全榜，且两期都在榜的书（新进榜作品的签约不算本期新增）。' +
+    /* ⚠ 原文是「该榜全榜」，被误读成榜的性质（用户 2026-09-24）。
+       这里要说的是**统计范围不截断名次**（整个 Top1000 都算，不是只取 Top50），
+       改成不含歧义的说法；榜的性质由卡片副标题的「长期榜」负责。 */
+    '统计范围：该榜全部在榜作品（不截断名次），且两期都在榜的书（新进榜作品的签约不算本期新增）。' +
     '对比上期 ' + (x.shang_qi_ri || '—') + ' → 本期 ' + (x.caiji_ri || '—') + '。' +
     '签约类型由平台主动披露，新增仅代表本期页面上新出现该标注，' +
     '不代表此前未授权，也不代表作品已开始制作或上线。') + '</div>';
@@ -1777,9 +2170,16 @@ function renderOverview() {
   var xz = ov.xinzeng || {};
   h += '<div class="card-hd" style="padding:0 0 10px"><span class="h">本期新增</span>' +
        '<span class="s">番茄看已上线部数的增加，起点/晋江看新公开的签约类型；两者不同源，不可合并计数</span></div>';
+  /* ⭐ 2026-10-20 用户要求：全库深度与头部深度拆成**左右并列的两张小图**
+     （原来是一张卡里叠两根条，读起来费劲），并与「本期追加改编」三卡并列。
+     ⚠ 两张深度图共用同一横轴刻度（max 在 gailanPpbHtml 里按两个字段一起算），
+       否则各自归一化后两张图一样长，"头部更深"就看不出来了。 */
   h += '<div class="g-xz-grid" style="margin-bottom:16px">' +
        cardHtml('番茄全库改编深度', '平均每本改编部数逐期变化',
-                gailanPpbHtml(xz.quan_ku_ppb)) +
+                gailanPpbHtml(xz.quan_ku_ppb, 'quan')) +
+       cardHtml('番茄头部改编深度', '原著累计阅读前 ' +
+                (touBuBiliTxt(xz.quan_ku_ppb) || '—') + ' 的书，逐期变化',
+                gailanPpbHtml(xz.quan_ku_ppb, 'tou')) +
        cardHtml('番茄头部本期追加改编', '两个榜单 Top10 内短剧+漫剧部数上升的作品',
                 gailanTopZengHtml(xz.fanqie_toubu_zengzhang)) +
        '</div>';
@@ -1787,9 +2187,12 @@ function renderOverview() {
      晋江长期榜就是 Top1000，Top50 是我们自己截断出来的）。
      也不许写「前几期如何」这类需要额外核实的话 —— 期数由 ETL 给，写死会过期。 */
   h += '<div class="g-xz-grid" style="margin-bottom:16px">' +
-       cardHtml('起点收藏榜本期新增签约', '全榜 · 两期都在榜的书',
+       /* ⚠ 副标题第一段写**榜的性质**（长期榜），不写「全榜」（用户 2026-09-24）：
+          起点收藏榜 Top1000 与晋江积分榜 Top1000 都是长期榜，读者看到「全榜」
+          会误以为是在说榜的性质。「不截断名次」这层意思挪到脚注里说。 */
+       cardHtml('起点收藏榜本期新增签约', '长期榜 · 两期都在榜的书',
                 gailanXinzengQianyueHtml(xz.qidian_xinzeng, 'qidian')) +
-       cardHtml('晋江积分榜本期新增签约', '全榜 · 两期都在榜的书',
+       cardHtml('晋江积分榜本期新增签约', '长期榜 · 两期都在榜的书',
                 gailanXinzengQianyueHtml(xz.jjwxc_xinzeng, 'jjwxc')) +
        '</div>';
 

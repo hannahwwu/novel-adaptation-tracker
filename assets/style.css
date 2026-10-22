@@ -275,6 +275,12 @@ a { color: inherit; text-decoration: none; }
 .stat .s { font-size: 12px; color: var(--ink-3); }
 .stat .s.up { color: var(--up); font-weight: 600; }
 .stat .s.down { color: var(--down); font-weight: 600; }
+/* 双指标并列卡（番茄改编全库「有 AI 漫剧的书 / 有真人短剧的书」，2026-10-22）。
+   两栏等宽、各自「小标题 + 大号数字」，强调两者是并列关系而非包含关系。
+   ⚠ 数字仍用 .stat .n（26px），单位用 <small>（13px），不要另起字号。 */
+.stat-duo { display: flex; gap: 14px; }
+.stat-duo .duo-col { flex: 1 1 0; min-width: 0; }
+.stat-duo .l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 洞察专栏：给结论一个显眼但不占地方的容器。
    左侧色条 + 细标题带，视觉上把洞察和下面的图表卡区分开。
@@ -414,9 +420,14 @@ a { color: inherit; text-decoration: none; }
 .tag.src { background: var(--white); border-color: var(--line-strong); color: var(--ink-3); font-weight: 600; }
 /* 主题材标签：比子标签更突出，一眼区分「主分类」与「附加标签」 */
 .tag.t-main { background: var(--ink); color: #fff; border-color: var(--ink); }
-.tag.perf-超预期   { background: #fdeceb; color: #a5241d; border-color: #f6c3bf; }
-.tag.perf-不及预期 { background: #e8f8f1; color: #0b6e4f; border-color: #b6e3ce; }
-.tag.perf-符合预期 { background: var(--bg-sunken); color: var(--ink-2); border-color: var(--line-strong); }
+/* ⛔ 2026-10-20 已删除 .tag.perf-超预期 / 不及预期 / 符合预期 三条：
+   整套「超预期」判定被用户要求清除，对应的表格列也已删。⛔ 不许加回来。
+   ⚠ 替代品 .jg-tag（「原著体量 × 改编热度」区段标签）**刻意不上色**：
+     九个区段之间没有好坏之分，上色就是在暗示价值判断 —— 那正是用户要去掉的东西。 */
+.tag.jg-tag {
+  background: var(--bg-sunken); color: var(--ink-2); border-color: var(--line-strong);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 .tag.none { background: var(--white); color: var(--ink-3); border-color: var(--line-strong); border-style: dashed; }
 
 /* ============ 分页 ============ */
@@ -540,16 +551,9 @@ a { color: inherit; text-decoration: none; }
 .linechart .dot { pointer-events: none; }
 
 /* 判定阈值说明行：替代原先那张 6 列表格，每档一行小字。 */
-.thresh-note {
-  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line);
-  display: flex; flex-direction: column; gap: 4px;
-  font-size: 11.5px; color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-}
-.thresh-note b { color: var(--ink-2); font-weight: 700; }
-/* 并列后卡片只有半宽，每档那行必然折行。给行高留出间距，
-   否则折行后上下两档的文字会粘在一起分不清是哪一档。 */
-.thresh-note span { line-height: 1.55; }
+/* ⛔ 2026-10-20 已删除 .thresh-note（「改编表现判定阈值」图卡下方的阈值小字）。
+   那张卡随整套超预期判定一起删了，样式没有任何使用点。⛔ 不许加回来。 */
+
 
 /* ============ 概览页（2026-09-14 改版） ============ */
 /* ① 头部改编速览：六个榜各一张卡，短期榜在左、长期榜在右，按平台分三行。
@@ -573,6 +577,19 @@ a { color: inherit; text-decoration: none; }
 .g10-shu i {
   font-style: normal; font-weight: 600; font-size: 10.5px;
   color: var(--ink-3); opacity: .75; margin-left: 7px; white-space: nowrap;
+}
+/* ① 番茄「其他」列头的 ⓘ：说明这一列装的是什么。
+   用户 2026-09-15 要的是**圈里 i 的浮窗**，不是列头下面一行小字 ——
+   全站口径说明统一收进 ⓘ 是 09-07 就定下的原则，别再换回去。
+   ⚠ .pop-bd 的 left/right/width 只在 .note-row / .stat 里定义过，
+     在表头里**必须自己给宽与定位**，否则浮窗会塌成 0 宽或贴着列边乱飘。
+   ⚠ 浮窗的祖先不能有 overflow:hidden/auto/scroll ⇒ 番茄卡刻意不套 .g10-scroll
+     （见 gailanTop10Card 里的注释，与 sticky 表头那条坑同源）。 */
+.g10-lei .pop { margin-left: 3px; vertical-align: 0; }
+.g10-lei .pop > b { font-size: 12px; }
+.g10-lei .pop-bd {
+  width: 268px; max-width: min(268px, calc(100vw - 40px));
+  left: auto; right: -8px; top: calc(100% + 5px); z-index: 45;
 }
 /* 横向滚动容器：长类型名改横排后，晋江 Top10 实测 14 列 ≈ 1.3k px，
    卡片里放不下就在这里横向滚（用户 2026-09-14）。
@@ -624,6 +641,16 @@ a { color: inherit; text-decoration: none; }
 /* 分布卡的横条：类目名可能很长（「中国大陆出版最新签约」11 字），
    给类目列比通用 .bar-row 的 104px 更宽，否则全被 ellipsis 吃掉。 */
 .g-fenbu-grid .bar-row { grid-template-columns: 132px 1fr 64px; }
+/* 类目全量列出后，晋江积分榜有 32 类（≈770px），番茄巅峰榜只有 4 类（≈96px），
+   三卡并排会差 8 倍高。给横条区限高 + 纵向滚动（用户 2026-09-24 选定）。
+   ⚠ 250px ≈ 10 条，番茄/起点本来就不到这个高度 ⇒ 不出滚动条，只有晋江会滚。
+   ⛔ 限高只能加在 .bars 上，**不许加到 .card-bd 或整卡**：
+      脚注 .g10-foot 在 .bars 外面，包进滚动区就得滚到底才看见口径说明。
+   ⛔ 这里的 overflow 与「sticky 表头」「ⓘ 浮窗」那两条坑同源，但分布卡
+      既无 sticky 也无 ⓘ（cardHtml 只传了三个参），类目名用的是原生 title
+      tooltip，不受 overflow 裁剪影响 —— 所以这里是安全的。
+      以后若给分布卡加 ⓘ 浮窗，必须把 ⓘ 放在 .bars 外。 */
+.g-fenbu-grid .bars { max-height: 250px; overflow-y: auto; padding-right: 4px; }
 /* ③ 本期新增：左侧全库趋势，右侧头部明细
    ⚠ grid 默认 align-items:stretch 会把同行的两张卡拉成等高，
      矮的那张底部会空一大块，看起来像"没对齐"。让内容贴底：
@@ -640,6 +667,165 @@ a { color: inherit; text-decoration: none; }
 .g-ppb-row .rq { color: var(--ink-3); font-variant-numeric: tabular-nums; font-weight: 600; }
 .g-ppb-row .vv { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink-2); }
 .g-ppb-row.now .rq, .g-ppb-row.now .vv { color: var(--ink); }
+/* 2026-09-25：每期从一根条变成两根（全库 / 头部），条区改成纵向 grid。
+   ⚠ 日期列与数值列保持单列不变，只有中间条区变成两行 —— 这样 6 期仍是 6 行，
+     不会变成 12 行把卡片撑长。数值列用 <br> 两行对齐两根条。 */
+.g-ppb-tiao { display: grid; gap: 3px; }
+.g-ppb-row .vv { line-height: 1.45; }
+
+/* ── 影视动漫待签约专区（2026-10-20）────────────────────────────────
+   起点有「总推荐」列、晋江没有 ⇒ 列数不同，用 CSS 变量切换模板。
+   ⚠ 书名/作者/现有改编三列都给 minmax(0,…)，否则长文本撑破 grid 不换行。 */
+.dqy-tbl { display: grid; gap: 3px; font-size: 12px; }
+.dqy-tr {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 2fr) minmax(0, 92px) 76px 82px minmax(0, 2.2fr);
+  gap: 8px; align-items: center;
+  padding: 5px 7px; border-radius: 4px; background: var(--bg-sunken);
+}
+/* 晋江没有「总推荐」列：少一列，重分配。
+   ⛔ 用**本表自带的** .dqy-wu-tui 切换，不要依赖页面级祖先 class ——
+     本站根本没有 .pg-jjwxc 这种东西（我第一版臆造了一个，CSS 会静默失效：
+     选择器匹配不到不报错，只是列宽用回 6 列模板、最后一列被挤没）。
+     同类坑见 README「.dtr/.dhead 全带 .detail-panel 前缀，概览页不生效」。 */
+.dqy-tbl.dqy-wu-tui .dqy-tr {
+  grid-template-columns: 42px minmax(0, 2fr) minmax(0, 92px) 76px minmax(0, 2.6fr);
+}
+.dqy-th {
+  background: none; color: var(--ink-3); font-size: 11px; font-weight: 700;
+  padding-bottom: 2px; border-radius: 0; border-bottom: 1px solid var(--line);
+}
+.dqy-m { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dqy-d {
+  color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dqy-d i { font-style: normal; opacity: .75; }
+/* 大神/白金作家角标。⚠ 用 --qidian 而不是 --up：这是「作者资质」标识，
+   不是涨跌/好坏判断（专区整体口径是"筛选不是评价"）。
+   ⚠ 2026-10-21 由笼统的「神」改成写明【白金】/【大神】（用户要求），
+     两档用深浅区分：白金是从大神晋升上来的、更高一档，所以用实色；
+     大神用浅底描边，避免两个色块一样重、读者分不出层级。 */
+.dqy-ds {
+  display: inline-block; margin-left: 4px; padding: 0 4px;
+  font-size: 10px; font-weight: 700; line-height: 15px;
+  color: #fff; background: var(--qidian); border-radius: 3px;
+  vertical-align: 1px; white-space: nowrap;
+}
+.dqy-ds-ds {
+  color: var(--qidian); background: transparent;
+  box-shadow: inset 0 0 0 1px var(--qidian);
+}
+.dqy-r { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+
+/* 待签约专区的筛选档按钮（用户 2026-10-21）。
+   ⚠ 只在多于一档时渲染（晋江只有一档，不画）。
+   ⚠ 放在 .card-bd 内、表格之上；**不要**做成 .card-hd 里的控件 ——
+     .card-hd 是 flex+wrap，塞控件会影响并列卡的表头行数对齐。 */
+.dqy-dang { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+.dqy-dang-b {
+  font: inherit; font-size: 12px; cursor: pointer;
+  padding: 5px 10px; border-radius: var(--r);
+  color: var(--ink-2); background: var(--bg-soft);
+  border: 1px solid var(--line);
+}
+.dqy-dang-b:hover { color: var(--ink); border-color: var(--qidian); }
+.dqy-dang-b.on {
+  color: var(--white); background: var(--qidian); border-color: var(--qidian);
+}
+/* 档内本数：跟在文案后面的小数字 */
+.dqy-dang-b i {
+  font-style: normal; margin-left: 5px; opacity: .72;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 分组迷你竖柱（题材改编热度：每个题材两根柱）。
+   ⚠ .mcol-shuang 吃掉 .mcol 的剩余高度（原来那块是 .mcol-track），
+     内部两根 track 各占一半宽、底对齐。
+   ⚠ 本图刻意不用 .mcol-v（柱顶数值）：8 题材 × 2 值 = 16 个数字读不了，
+     精确值走 title 悬停。所以这里不需要给 .mcol-v 留空间。 */
+/* ⛔⛔ 2026-10-20 已删除 .mcols-zu / .mcol-shuang 整族（div 版分组双柱）。
+   那套实现**线上整张图不可见**：`.mcol-track` 原本靠 `flex:1` 在 column 方向
+   撑出高度，放进 flex **row** 的 .mcol-shuang 后 flex:1 改成分配「宽度」、
+   高度转由 align-items 决定 ⇒ 「track 高度取决于内容、内容高度又是 track 的
+   百分比」形成循环依赖，一起塌成 0。补 `height:100%` 后仍不显示
+   —— 这条 flex 高度链太长太脆，不值得继续修。
+   ⇒ 「题材改编热度水位」已改用 **SVG**（见 app.js 的 miniColsZuHtml），
+     坐标是绝对像素，不依赖任何父级高度。⛔ 不许改回 div + 百分比高度。
+   ⚠ 教训：这个 bug 的 HTML 完全正确（柱子在、height:70.4% 也在），
+     所有"数元素"的断言都是绿的，只有打开页面才看得见。 */
+
+/* ── 原著体量 × 改编热度 九宫格（2026-10-20）────────────────────────────
+   4 列 grid：第 1 列是行表头（阅读档），后 3 列是热度档。
+   ⚠ 行表头列给 150px 定宽：里面有「阅读 中间 50%」+「13,038 本」两行，
+     auto 会让三行各自解析出不同宽度 ⇒ 列错位（① 卡那条坑同源）。 */
+.jg-tbl {
+  display: grid; grid-template-columns: 150px repeat(3, 1fr); gap: 4px;
+}
+.jg-jiao {
+  font-size: 11px; color: var(--ink-3); line-height: 1.3;
+  display: flex; align-items: flex-end; padding-bottom: 4px;
+}
+.jg-th {
+  font-size: 12px; font-weight: 700; color: var(--ink-2); text-align: center;
+  padding-bottom: 4px; align-self: flex-end;
+}
+.jg-rh {
+  font-size: 12px; font-weight: 700; color: var(--ink-2);
+  display: flex; flex-direction: column; justify-content: center;
+  padding-right: 8px;
+}
+.jg-rh i {
+  font-style: normal; font-weight: 500; font-size: 11px;
+  color: var(--ink-3); margin-top: 2px;
+}
+/* 格子：上方书数、下方占比。min-height 保证底色块够大能看出色阶。 */
+.jg-td {
+  min-height: 56px; border-radius: 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  border: 2px solid transparent;
+}
+.jg-td b {
+  font-size: 15px; font-weight: 700; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.jg-td span { font-size: 11.5px; color: var(--ink-2); margin-top: 1px; }
+/* 对角线（两档一致）加框。用 --ink 而不是主题色：底色已是橙系，再用橙描边看不出来。 */
+.jg-td.jg-dui { border-color: var(--ink); }
+
+/* 两组书单：左右分栏 */
+.jg-zu-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;
+}
+.jg-zu-t {
+  font-size: 13px; font-weight: 700; color: var(--ink);
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
+}
+.jg-zu-t i {
+  font-style: normal; font-weight: 500; font-size: 11.5px; color: var(--ink-3);
+}
+.jg-zu-s { font-size: 11.5px; color: var(--ink-3); margin: 3px 0 8px; line-height: 1.5; }
+.jg-dan { display: grid; gap: 4px; }
+/* 每行：书名(伸缩) / 题材 / 阅读 / 热度。书名列 minmax(0,1fr) 才能正常 ellipsis。 */
+.jg-dan-r {
+  display: grid; grid-template-columns: minmax(0, 1fr) 68px 82px 82px;
+  gap: 6px; align-items: center; font-size: 12px;
+  padding: 4px 6px; border-radius: 4px; background: var(--bg-sunken);
+}
+.jg-dan-m { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jg-dan-c { font-size: 11px; color: var(--ink-3); text-align: center; }
+.jg-dan-v {
+  font-size: 11.5px; color: var(--ink-2); text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.jg-tc {
+  font-size: 11.5px; color: var(--ink-3); line-height: 1.6; margin-top: 8px;
+  padding-top: 7px; border-top: 1px solid var(--line);
+}
+@media (max-width: 720px) {
+  .jg-tbl { grid-template-columns: 96px repeat(3, 1fr); }
+  .jg-rh, .jg-th { font-size: 11px; }
+  .jg-dan-r { grid-template-columns: minmax(0, 1fr) 56px 70px 70px; font-size: 11px; }
+}
 /* ③ 明细列表（头部增长 / 新增签约）共用 */
 .g-xz-list { display: grid; }
 .g-xz-item {
