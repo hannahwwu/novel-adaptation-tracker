@@ -585,7 +585,14 @@ a { color: inherit; text-decoration: none; }
      在表头里**必须自己给宽与定位**，否则浮窗会塌成 0 宽或贴着列边乱飘。
    ⚠ 浮窗的祖先不能有 overflow:hidden/auto/scroll ⇒ 番茄卡刻意不套 .g10-scroll
      （见 gailanTop10Card 里的注释，与 sticky 表头那条坑同源）。 */
-.g10-lei .pop { margin-left: 3px; vertical-align: 0; }
+.g10-lei .pop { margin-left: 3px; vertical-align: 0; position: relative; }
+/* ⛔⛔ 上面这个 position:relative 不能删（2026-10-23 线上 bug）：.pop-bd 是
+   position:absolute，`.g10-lei`/`.g10-tr`/`.card` 都没定位 ⇒ 没有它时浮窗的
+   `top:calc(100%+5px)` / `right:-8px` 会以**初始包含块（视口）** 为参照，
+   实测落到 y=602（视口高 597）＝屏幕外，表现为「点 ⓘ 完全没反应」。
+   锚点必须是被点的那颗 ⓘ（.pop 本身），不能改成 .g10-tr（那样浮窗会跑到
+   卡片最右边、不在列头下方）。
+   ⚠ 其余 ⓘ 用的是 .note-row / .stat 当锚点，别照抄到那边去。 */
 .g10-lei .pop > b { font-size: 12px; }
 .g10-lei .pop-bd {
   width: 268px; max-width: min(268px, calc(100vw - 40px));
