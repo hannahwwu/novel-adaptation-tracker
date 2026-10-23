@@ -1356,7 +1356,7 @@ function daiQianYueHtml(d, plat, pageKey) {
      ⛔ 不要靠页面级祖先 class 区分（本站没有 .pg-xxx 这种东西）。 */
   var g = qie + '<div class="dqy-tbl' + (shiQi ? '' : ' dqy-wu-tui') + '">' +
           '<div class="dqy-tr dqy-th">' +
-          '<div>#</div><div>书名</div><div>作者</div><div>题材</div>' +
+          '<div>排名</div><div>书名</div><div>作者</div><div>题材</div>' +
           (shiQi ? '<div class="dqy-r">总推荐</div>' : '') +
           '<div>现有改编披露</div></div>';
   dang.rows.forEach(function (r) {
@@ -1714,10 +1714,15 @@ function gailanZuiXiao(plat, ge) {
   return 28 + G10_SHUMING_KUAN + k * w + (k + 1) * G10_LIE_JIANXI;
 }
 
-/* ① 表头：书名那一格右边带一个小注（番茄「单位：部」/ 起晋「签约」）。 */
+/* ① 表头：书名那一格右边带一个小注（番茄「单位：部」/ 起晋「签约」）。
+   ⚠ 第一列放的是**这本书在榜上的名次**，不是序号、也不是数量 ⇒ 表头写「排名」，
+     不写「#」（用户 2026-10-22：看不懂 # 是啥）。
+   ⛔ 同语义的三处表头必须一起改：① 这里、③ 新增签约、起点收藏榜「待签约专区」，
+      否则同一个站出现两套叫法。（列宽仍按 28px 排，两个字放得下，别顺手去改
+      style.css 里那句 `left: 36px` 的 sticky 偏移。） */
 function gailanHeadHtml(b, ge, grid) {
   var isFanqie = b.platform === 'fanqie';
-  var h = '<div>#</div>' +
+  var h = '<div>排名</div>' +
           '<div class="g10-shu">书名<i>' + (isFanqie ? '单位：部' : '签约') + '</i></div>';
   if (isFanqie) {
     /* 「其他」这一列到底装了什么，光看列名猜不出来 —— 挂一个 ⓘ 浮窗说明
@@ -2111,7 +2116,7 @@ function gailanXinzengQianyueHtml(x, plat) {
   var grid = gailanGrid(plat, ge);
   var h = '<div class="g10-scroll"><div class="g10-tbl" style="min-width:' +
           gailanZuiXiao(plat, ge) + 'px"><div class="g10-tr g10-head" ' +
-          'style="grid-template-columns:' + grid + '"><div>#</div>' +
+          'style="grid-template-columns:' + grid + '"><div>排名</div>' +
           '<div class="g10-shu">书名<i>' + esc(xin) + '</i></div>' +
           ge.map(function (t) {
             /* 与 ① 同一套简称：显示简称、title 全名 */
