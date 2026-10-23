@@ -578,6 +578,13 @@ a { color: inherit; text-decoration: none; }
   font-style: normal; font-weight: 600; font-size: 10.5px;
   color: var(--ink-3); opacity: .75; margin-left: 7px; white-space: nowrap;
 }
+/* 「未采集」小注（2026-10-23）：区分「详情没采到」与「采到了但平台没标注该类型」。
+   ⚠ 挂在书名后面、跟着书名走 —— ⛔ 不许做成整列或逐格占位（会撑出一墙「未采集」）。
+   用琥珀色而不是灰，是因为它提示的是"这条要打折扣看"，与普通小注语义不同。 */
+.g10-weicai {
+  font-style: normal; font-weight: 600; font-size: 10.5px;
+  color: #b45309; opacity: .9; margin-left: 6px; white-space: nowrap;
+}
 /* ① 番茄「其他」列头的 ⓘ：说明这一列装的是什么。
    用户 2026-09-15 要的是**圈里 i 的浮窗**，不是列头下面一行小字 ——
    全站口径说明统一收进 ⓘ 是 09-07 就定下的原则，别再换回去。

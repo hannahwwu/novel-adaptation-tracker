@@ -1083,6 +1083,14 @@ function renderWwds(page, snap) {
      两张都在才并列，只剩一张时整宽输出（并列会被 auto-fit 拉成半宽显得残缺）。 */
   var quShiCharts = [];
 
+  /* 在途月已被 ETL 整月剔除，脚注必须写明 —— 否则读者会以为「漏了最新一个月」，
+     或者把去掉断崖后的曲线当成「10 月还没数据」。⛔ 不许在前端补 0 或按天折算。 */
+  var yiTiYue = s.yue_du_yi_ti_yue || '';
+  var tiYueZhu = yiTiYue
+    ? '<div class="g10-foot">已剔除未采满的 ' + esc(yiTiYue) +
+      '（该月只采到月中，画进来会出现一根假断崖；与概览热度分层图同一条口径）。</div>'
+    : '';
+
   if (monthly.length >= 2) {
     /* 折线图：合计 / AI 漫剧 / 真人短剧 三条线。原先是「每月一根横条」，
        月份多了以后既高又看不出趋势，折线能直接看到交叉点（AI 何时超过真人）。 */
@@ -1096,7 +1104,7 @@ function renderWwds(page, snap) {
       ]);
     quShiCharts.push(cardHtml('改编作品上线月度趋势',
                   '按上线月份统计当月新增作品数，纵轴为部数；鼠标悬停任一月份看三条线的具体数值',
-                  body, 'ka-quxian'));
+                  body + tiYueZhu, 'ka-quxian'));
   }
 
   /* 热度天花板趋势：真人 vs AI 每月 top N 峰值热度均值，回答「改编剧能达到的
@@ -1121,7 +1129,7 @@ function renderWwds(page, snap) {
     quShiCharts.push(cardHtml('改编剧热度天花板月度趋势',
                   '按上线月份取该月峰值热度前 ' + topN + ' 部的均值，纵轴为热度（万）；' +
                   '热度为红果历史最高热度（非当月值），当月该类型不足 ' + minJu + ' 部则断线不画',
-                  body3, 'ka-quxian'));
+                  body3 + tiYueZhu, 'ka-quxian'));
   }
 
   if (quShiCharts.length === 2) h += '<div class="grid2">' + quShiCharts.join('') + '</div>';
@@ -1658,6 +1666,12 @@ function gailanLeiBiao(b) {
      名单外的新类型（上游新增）追加在后 —— 不许因为不在名单里就丢掉。 */
   var xu = b.lei_xu || [];
   if (!xu.length) return out;
+  /* ⭐ 本榜 Top10 一本签约都没标时（晋江月榜的常态），用 ETL 给的兜底列集
+     （= 同期晋江积分榜 Top10 出现过的类型）把列全画出来、只是不打勾。
+     用户 2026-10-23：没有列 ⇒ 读者以为是数据缺失；有列全空 ⇒ 才看得出是没标注。
+     ⛔ 兜底只在「本榜一个类型都没有」时生效，别把它变成常规路径 ——
+        晋江积分榜 Top1000 有 32 种类型，全画出来会撑一屏空列。 */
+  if (!out.length) return xu.slice();
   var inXu = [], qiTa = [];
   xu.forEach(function (t) { if (seen[t]) inXu.push(t); });
   out.forEach(function (t) { if (xu.indexOf(t) < 0) qiTa.push(t); });
@@ -1773,6 +1787,11 @@ function gailanTop10Card(b) {
             gailanZuiXiao(b.platform, ge) + 'px">' + gailanHeadHtml(b, ge, grid);
   var body = isFanqie ? tbl : '<div class="g10-scroll">' + tbl;
   rows.forEach(function (r) {
+    /* 「未采集」小注：yi_caiji===false = 该书详情本期没采到，与「采到了但平台没标」
+       是两件事。此前都渲染成空，读者分不清 —— 用户 2026-10-23 要求区分。
+       ⚠ 番茄卡没有该字段（行里是部数），不要给它加。 */
+    var weiCai = (!isFanqie && r.yi_caiji === false)
+      ? '<i class="g10-weicai">未采集</i>' : '';
     var cells = isFanqie
       ? ['duanju', 'manju', 'qita'].map(function (k) {
           var v = r[k] || 0;
@@ -1780,26 +1799,35 @@ function gailanTop10Card(b) {
           return '<div class="g10-num' + (v ? '' : ' z') + '">' + v + '</div>';
         }).join('')
       : ge.map(function (t) {
-          /* √ = 平台在本期公开披露了这一签约类型；空 = 没披露。
-             ⚠ 空 ≠ 没签约，脚注里必须写清（原来是「未采集 / 无签约」两种态，
-               现在统一成"空"，所以脚注要把两件事都覆盖到）。 */
+          /* √ = 平台在本期公开披露了这一签约类型；空 = 采到了但平台没标。
+             未采集（整行）另由上面的「未采集」小注说明，不逐格重复。 */
           var you = (r.qianyue_leixing || []).indexOf(t) >= 0;
           return '<div class="g10-lei g10-gou">' + (you ? '√' : '') + '</div>';
         }).join('');
     body += '<div class="g10-tr" style="grid-template-columns:' + grid + '">' +
             '<div><span class="rankno">' + (r.rank || '—') + '</span></div>' +
-            '<div class="cell name" title="' + esc(r.name) + '">' + esc(r.name) + '</div>' +
-            cells + '</div>';
+            '<div class="cell name" title="' + esc(r.name) + '">' + esc(r.name) + weiCai +
+            '</div>' + cells + '</div>';
   });
   body += isFanqie ? '</div>' : '</div></div>';
 
   /* 脚注：口径 + 两个日期。番茄巅峰榜实测榜单日与改编采集日能差 9 天，
      只标一个会让读者以为是同一天的数据。 */
+  var benBangYouLei = (rows || []).some(function (r) {
+    return (r.qianyue_leixing || []).length > 0;
+  });
   var foot = isFanqie
     ? '数字为番茄 App 改编板块内已上线的作品部数（可有多部）。'
-    : '每列是平台公开披露的一种版权签约类型，√ 表示该书被标注了该类型，'
-      + '空表示本期页面未披露——空不等于未签约，更不代表未改编；'
+    : '每列是平台公开披露的一种版权签约类型，√ 表示该书被标注了该类型；'
+      + '空 = 该书详情已采到、但平台未标注该类型（不是数据缺失）；'
+      + '书名后标「未采集」= 该书详情本期没采到，其签约情况无法判断；'
       + '一本书可以同时被标注多种类型，所以一行可以有多个 √。';
+  /* 晋江月榜本期 Top10 一本签约都没标（实测 2026-09-24）⇒ 列集合是借来的，
+     ⛔ 必须写明来源，否则读者会以为「这些列本来属于这个榜」。 */
+  if (!isFanqie && b.platform === 'jjwxc' && !benBangYouLei) {
+    foot += ' 本榜本期 Top10 没有任何签约标注——类型列取自同期《晋江积分榜 Top1000》'
+          + '（两卡列一一对应），空勾即表示平台没标注该类型。';
+  }
   foot += '榜单日 ' + esc(b.bangdan_ri || '—') + '，改编采集日 ' + esc(b.caiji_ri || '—');
   if (b.bangdan_ri && b.caiji_ri && b.bangdan_ri !== b.caiji_ri) foot += '（两者不同期）';
   foot += '。';
@@ -1894,19 +1922,25 @@ function gailanPpbHtml(ppb, naYi) {
       ((v || 0) / max * 100).toFixed(1) + '%;background:' + se + '"></div></div>' +
       '<div class="vv">' + (v == null ? '—' : v + ' 部/本') + '</div></div>';
   }).join('') + '</div>';
-  var tou = ppb[0], wei = ppb[ppb.length - 1];
+  /* ⚠⚠ 对比基准 = **紧邻上一期**，不是首期（用户 2026-10-23 明确）。
+     首期是 2026-08-10（22,855 本 / 49,917 部），本期 71,824 部，中间全库在快速扩充，
+     拿首期当基准算出来的「变化」混进了入库规模扩张，两期不可比。
+     取紧邻上期才是同口径的环比。
+     ⚠ 只有 1 期时没有上期可比 ⇒ shang 退化为本期（两处数字相同，不编造对比）。 */
+  var ben = ppb[ppb.length - 1];
+  var shang = ppb.length >= 2 ? ppb[ppb.length - 2] : ben;
   var foot;
   if (shiTou) {
     foot = '头部 = 按原著累计阅读降序取前 ' + (touBuBiliTxt(ppb) || '—') +
-           ' 的书（本期 ' + num(wei.tou_books || 0) +
+           ' 的书（本期 ' + num(ben.tou_books || 0) +
            ' 本），改编部数口径与左图完全一致。' +
-           tou.ri + ' ' + (tou.tou_ppb == null ? '—' : tou.tou_ppb) + ' 部/本 → ' +
-           wei.ri + ' ' + (wei.tou_ppb == null ? '—' : wei.tou_ppb) + ' 部/本。' +
+           shang.ri + ' ' + (shang.tou_ppb == null ? '—' : shang.tou_ppb) + ' 部/本 → ' +
+           ben.ri + ' ' + (ben.tou_ppb == null ? '—' : ben.tou_ppb) + ' 部/本（对比上一期）。' +
            '两图共用同一横轴刻度，可直接比长短。';
   } else {
     foot = '平均每本改编部数 = 该期改编作品总部数 / 入库小说数。' +
-           tou.ri + ' 共 ' + num(tou.books) + ' 本 / ' + num(tou.dramas) + ' 部，' +
-           wei.ri + ' 共 ' + num(wei.books) + ' 本 / ' + num(wei.dramas) + ' 部。' +
+           shang.ri + ' 共 ' + num(shang.books) + ' 本 / ' + num(shang.dramas) + ' 部，' +
+           ben.ri + ' 共 ' + num(ben.books) + ' 本 / ' + num(ben.dramas) + ' 部（对比上一期）。' +
            '覆盖番茄改编全库，非榜单头部。';
   }
   h += '<div class="g10-foot">' + esc(foot) + '</div>';
