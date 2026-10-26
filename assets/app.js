@@ -80,7 +80,7 @@ function logoSvg(plat, size) {
 /* ---------------- 导航配置 ---------------- */
 var NAV = [
   { key: 'overview', label: '概览', p: 'overview',
-    title: '概览', sub: '三平台头部与本期变化' },
+    title: '概览', sub: '三平台榜首段与本期变化' },
   { key: 'fanqie_wwds', label: '番茄小说', p: 'fanqie',
     title: '番茄改编全库', sub: '全量' },
   { key: 'fanqie_hot', label: '番茄小说', p: 'fanqie',
@@ -352,12 +352,20 @@ function statCard(label, value, sub, subCls, labelHouZhui) {
    ⛔ 这两个数是**并列关系**（一本书可以同时有 AI 漫剧和真人短剧，两者相加 ≠ 全集），
      原先把后者写成前者的副标题（`statCard(..., '有真人短剧的书 8,116 本')`），
      会被读成「AI 漫剧 21,187 本，其中真人短剧 8,116 本」—— 口径完全错了。
-   ⚠ 值参数是**原样 HTML**（与 statCard 的 value 同规矩，允许拼 <small> 单位）。 */
-function statCardDuo(aLabel, aVal, bLabel, bVal) {
+   ⚠ 值参数是**原样 HTML**（与 statCard 的 value 同规矩，允许拼 <small> 单位）。
+   labelHouZhui（可选）：挂在第一个小标题右边的 HTML，专给 ⓘ 口径浮窗用，
+     与 statCard 第 5 参同规矩 —— **不走 esc()**，只准传本文件生成的浮窗片段。
+     ⚠ 必须兜底 `(labelHouZhui || '')`，漏了会拼出字面量 undefined。 */
+function statCardDuo(aLabel, aVal, bLabel, bVal, labelHouZhui) {
+  /* ⛔⛔ 2026-10-26：标签文字必须**再包一层 `.l-txt`**。
+     原来 `.stat-duo .l` 直接带 `overflow:hidden`（为了单行省略），而 ⓘ 浮窗
+     `.pop-bd` 是 absolute 挂在 `.l` 里面 ⇒ **被 overflow 裁掉，用户点了看不到浮窗**。
+     `_popcsscheck ③` 当场抓到。现在由内层 `.l-txt` 承担省略，`.l` 只做 flex 排列。 */
   return '<div class="stat stat-duo">' +
-         '<div class="duo-col"><div class="l">' + esc(aLabel) + '</div>' +
+         '<div class="duo-col"><div class="l"><span class="l-txt">' + esc(aLabel) + '</span>' +
+         (labelHouZhui || '') + '</div>' +
          '<div class="n">' + aVal + '</div></div>' +
-         '<div class="duo-col"><div class="l">' + esc(bLabel) + '</div>' +
+         '<div class="duo-col"><div class="l"><span class="l-txt">' + esc(bLabel) + '</span></div>' +
          '<div class="n">' + bVal + '</div></div></div>';
 }
 
@@ -901,7 +909,7 @@ function renderFanqieBoard(page, snap) {
                 'Top10 中 ' + num(t10Adapt) + ' / ' + num(t10) + ' 本已改编',
                 '', popKeHtml(
                   '<p class="pop-p">分子＝榜单前 10 名里存在<b>任意类型</b>改编作品（短剧 / 漫剧 / 真人讲书等）的书数；' +
-                  '分母＝前 10 名实际在榜书数。与左侧「已改编书数」<b>同口径</b>，只是把范围缩到头部 10 本。</p>',
+                  '分母＝前 10 名实际在榜书数。与左侧「已改编书数」<b>同口径</b>，只是把范围缩到前 10 名。</p>',
                   '查看 Top10 改编率口径'));
   h += statCard('改编作品总数', num(s.parts_total),
                 Object.keys(parts).sort(function (a, b) { return parts[b] - parts[a]; })
@@ -1072,8 +1080,18 @@ function renderWwds(page, snap) {
   h += '<div class="stats stats-3">';
   h += statCard('已改编小说', num(t.books), '至少 1 部改编作品上线');
   h += statCard('改编作品总数', num(t.dramas), '平均每本 ' + (t.parts_per_book || 0) + ' 部');
+  /* ⛔ 2026-10-26 用户要求：这两个数读者会本能相加，必须把「可重叠」写在页面上 ——
+     原来只有代码注释写了，卡片本身没挂 ⓘ。重叠数现算（ai + real − books）。 */
+  var chongDieShu = Math.max(0, (t.ai_books || 0) + (t.real_books || 0) - (t.books || 0));
   h += statCardDuo('有 AI 漫剧的书', num(t.ai_books),
-                   '有真人短剧的书', num(t.real_books) + '<small> 本</small>');
+                   '有真人短剧的书', num(t.real_books) + '<small> 本</small>',
+    popKeHtml(
+      '<p class="pop-p">两个数是<b>并列关系</b>，不是拆分：一本书可以同时有 AI 漫剧和真人短剧，' +
+      '所以两者相加会大于全库书数。</p>' +
+      '<p class="pop-p">本期重叠 <b>' + num(chongDieShu) + '</b> 本：' +
+      num(t.ai_books) + ' ＋ ' + num(t.real_books) + ' − ' + num(chongDieShu) + ' ＝ ' +
+      num(t.books) + ' 本（有改编的书）。</p>',
+      '查看这两个数的口径'));
   h += '</div>';
 
   h += insightsHtml(snap.insights);
@@ -1175,7 +1193,11 @@ function renderWwds(page, snap) {
         return { k: r.category, v: r.quan_jun,
                  t: wan(r.quan_jun) + '（全量 ' + num(r.books) + ' 本）' };
       }), 'var(--fanqie)', '纵轴为该题材全部已改编书的平均最高热度')));
-    wwdsCharts.push(cardHtml('题材改编热度 · 天花板',
+    /* ⛔ 2026-10-26 改名：原来叫「天花板」，而同一页右上那张月度趋势叫
+       「改编剧热度天花板月度趋势」（每月 top10 峰值均热）—— 同页两个「天花板」
+       一个是「题材前 20 本均热」、一个是「每月 top10 峰值均热」，撞词不同义。
+       用户定案：这张改叫「上限」，「天花板」只留给月度趋势那张，且两处口径都要写清。 */
+    wwdsCharts.push(cardHtml('题材改编热度 · 上限',
       '该题材热度最高的前 ' + chTopN + ' 本的平均热度；同样的题材池、同样的门槛，' +
       '按该指标取前 ' + chTou.length + ' —— 与左图不是同一批题材',
       miniColsDanHtml(chTou.map(function (r) {
@@ -1474,7 +1496,7 @@ function renderCopyrightBoard(page, snap) {
                   '《' + esc(s.depth.max_book) + '》· 中位 ' + num(s.depth.median_types) + ' 类');
   } else if (s.buckets && s.buckets.length) {
     var b0 = s.buckets[0], bl = s.buckets[s.buckets.length - 1];
-    h += statCard('头部 / 尾部改编率', pct(b0.adapted, b0.books) + ' → ' + pct(bl.adapted, bl.books),
+    h += statCard('榜首段 / 榜尾段改编率', pct(b0.adapted, b0.books) + ' → ' + pct(bl.adapted, bl.books),
                   b0.label + ' vs ' + bl.label, 'down');
   } else {
     h += statCard('样本题材数', num((s.cat_rows || []).length), '按平台主题材归类');
@@ -2186,7 +2208,7 @@ function renderOverview() {
   /* ── ① 头部改编速览：按平台分三行，每行左短期右长期 ── */
   var t10 = ov.top10 || [];
   if (t10.length) {
-    h += '<div class="card-hd" style="padding:0 0 10px"><span class="h">头部改编速览</span>' +
+    h += '<div class="card-hd" style="padding:0 0 10px"><span class="h">榜首段改编速览</span>' +
          '<span class="s">六个榜单各取 Top10 逐本明细；短期榜在左、长期榜在右</span></div>';
     ['fanqie', 'qidian', 'jjwxc'].forEach(function (plat) {
       var bang = t10.filter(function (b) { return b.platform === plat; });
@@ -2219,7 +2241,7 @@ function renderOverview() {
        cardHtml('番茄头部改编深度', '原著累计阅读前 ' +
                 (touBuBiliTxt(xz.quan_ku_ppb) || '—') + ' 的书，逐期变化',
                 gailanPpbHtml(xz.quan_ku_ppb, 'tou')) +
-       cardHtml('番茄头部本期追加改编', '两个榜单 Top10 内短剧+漫剧部数上升的作品',
+       cardHtml('番茄榜首段本期追加改编', '两个榜单 Top10 内短剧+漫剧部数上升的作品',
                 gailanTopZengHtml(xz.fanqie_toubu_zengzhang)) +
        '</div>';
   /* ⚠ 副标题不许写名次范围（原「长期榜 · Top50 头部」是错的：

@@ -280,7 +280,12 @@ a { color: inherit; text-decoration: none; }
    ⚠ 数字仍用 .stat .n（26px），单位用 <small>（13px），不要另起字号。 */
 .stat-duo { display: flex; gap: 14px; }
 .stat-duo .duo-col { flex: 1 1 0; min-width: 0; }
-.stat-duo .l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ⛔⛔ 2026-10-26：省略号**必须放在内层 `.l-txt`**，不能留在 `.l` 上。
+   `.l` 里有 ⓘ 浮窗（`.pop-bd` 是 absolute），`overflow:hidden` 会把它整块裁掉 ——
+   表现是「点 ⓘ 完全没反应」，而 HTML 断言全绿（_popcsscheck ③ 专门守这条）。 */
+.stat-duo .l { display: flex; align-items: center; white-space: nowrap; min-width: 0; }
+.stat-duo .l .l-txt { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.stat-duo .l .pop { flex: 0 0 auto; }
 
 /* 洞察专栏：给结论一个显眼但不占地方的容器。
    左侧色条 + 细标题带，视觉上把洞察和下面的图表卡区分开。
