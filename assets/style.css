@@ -853,6 +853,23 @@ a { color: inherit; text-decoration: none; }
 }
 .g-xz-item:first-child { border-top: 0; }
 .g-xz-item .bs { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--up); white-space: nowrap; }
+/* ③ 新增签约：一行一本「排名 书名 本期新增签约类型：X、Y」（2026-10-26 用户改版）。
+   ⛔ 原来的「一类型一列打 √」矩阵已删 —— 8 类型 × 8 本只有 9 个勾，
+     读者要横向找勾；而每本最多 2 个类型，直接用文字列出更快。
+   ⚠ 必须允许换行：晋江书名最长 13 字（「知否？知否？应是绿肥红瘦」），
+     加上类型名在窄屏会超出 —— 用 flex-wrap 让它折到第二行，不许裁。 */
+.g-xz-list { display: flex; flex-direction: column; gap: 0; }
+.g-xz-row {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 7px 2px; border-bottom: 1px solid var(--line);
+}
+.g-xz-row:first-child { padding-top: 0; }
+.g-xz-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.g-xz-row .rankno { min-width: 30px; text-align: right; flex: 0 0 auto; }
+.g-xz-name { font-weight: 600; color: var(--ink); }
+.g-xz-tag { font-size: 12.5px; color: var(--ink-2); }
+.g-xz-tag b { font-weight: 400; color: var(--ink-3); }
+
 .g-xz-none {
   font-size: 12.5px; color: var(--ink-3); line-height: 1.7;
   background: var(--bg-sunken); border-radius: var(--r); padding: 9px 11px;

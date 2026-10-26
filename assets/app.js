@@ -2145,7 +2145,6 @@ function gailanTopZengHtml(list) {
      晋江长期榜本来就是 Top1000，写 Top50 是基础错误）。
      名次范围如果真有截断，由 ETL 的 label 说明，不由前端拼。 */
 function gailanXinzengQianyueHtml(x, plat) {
-  var xin = plat === 'jjwxc' ? '新增签约类型' : '新增签约';
   if (!x || x.wu_fa_xianshi) {
     return '<div class="g-xz-none">' + esc((x && x.wu_fa_xianshi) || '暂无数据。') + '</div>';
   }
@@ -2161,36 +2160,25 @@ function gailanXinzengQianyueHtml(x, plat) {
            '不代表此前未授权，也不代表作品已开始制作或上线。';
     return '<div class="g-xz-none">' + esc(txt) + '</div>';
   }
-  /* 列表也做成「一类型一列打 √」的表格，与 ① 的列头表风格统一
-     （用户 2026-09-14：不要一行一个改编）。列 = 本卡内出现过的类型。 */
-  var ge = [];
-  var seen = {};
-  rows.forEach(function (r) {
-    (r.xinzeng_leixing || []).forEach(function (t) {
-      if (!seen[t]) { seen[t] = true; ge.push(t); }
-    });
-  });
-  var grid = gailanGrid(plat, ge);
-  var h = '<div class="g10-scroll"><div class="g10-tbl" style="min-width:' +
-          gailanZuiXiao(plat, ge) + 'px"><div class="g10-tr g10-head" ' +
-          'style="grid-template-columns:' + grid + '"><div>排名</div>' +
-          '<div class="g10-shu">书名<i>' + esc(xin) + '</i></div>' +
-          ge.map(function (t) {
-            /* 与 ① 同一套简称：显示简称、title 全名 */
-            return '<div class="g10-lei" title="' + esc(t) + '">' +
-                   esc(gailanJianCheng(t)) + '</div>';
-          }).join('') + '</div>';
+  /* ⛔ 2026-10-26 用户要求：不再做「一类型一列打 √」的矩阵，改成**直接用书名列类型**。
+     理由（用户原话）：「不要用打勾的形式了，太复杂。」
+     原实现列出本卡内出现过的全部类型再逐本打勾，本期晋江 8 个类型 × 8 本书
+     ⇒ 64 格里只有 9 个勾，读者要自己横向找；而每本书最多只有 2 个新增类型。
+     ⇒ 一行一本：「4  绍宋   本期新增签约类型：动画」。
+     ⚠ 类型名一律用上游原值（起点「动画」/ 晋江「电视剧签约」），**不加工、不简称** ——
+       ① 的卡里用简称是为了塞进列头，这里不需要。
+     ⚠ 保留排名：读者要能对上「这是榜上第几本」。 */
+  var h = '<div class="g-xz-list">';
   rows.forEach(function (r) {
     var tags = r.xinzeng_leixing || [];
-    h += '<div class="g10-tr" style="grid-template-columns:' + grid + '">' +
-         '<div><span class="rankno">' + (r.rank || '—') + '</span></div>' +
-         '<div class="cell name" title="' + esc(r.name) + '">' + esc(r.name) + '</div>' +
-         ge.map(function (t) {
-           return '<div class="g10-lei g10-gou">' +
-                  (tags.indexOf(t) >= 0 ? '√' : '') + '</div>';
-         }).join('') + '</div>';
+    h += '<div class="g-xz-row">' +
+         '<span class="rankno">' + (r.rank || '—') + '</span>' +
+         '<span class="g-xz-name" title="' + esc(r.name) + '">' + esc(r.name) + '</span>' +
+         '<span class="g-xz-tag"><b>本期新增签约类型：</b>' +
+         esc(tags.join('、')) + '</span>' +
+         '</div>';
   });
-  h += '</div></div>';
+  h += '</div>';
   h += '<div class="g10-foot">' + esc(
     /* ⚠ 原文是「该榜全榜」，被误读成榜的性质（用户 2026-09-24）。
        这里要说的是**统计范围不截断名次**（整个 Top1000 都算，不是只取 Top50），
