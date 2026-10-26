@@ -1121,7 +1121,8 @@ function renderWwds(page, snap) {
         { name: '真人短剧', color: '#ea580c', vals: last12.map(function (x) { return x.real; }) }
       ]);
     quShiCharts.push(cardHtml('改编作品上线月度趋势',
-                  '按上线月份统计当月新增作品数，纵轴为部数；鼠标悬停任一月份看三条线的具体数值',
+                  '按上线月份统计当月新增作品数（仅统计有红果热度的作品，与概览「热度分层分布」同一口径），' +
+                  '纵轴为部数；鼠标悬停任一月份看三条线的具体数值',
                   body + tiYueZhu, 'ka-quxian'));
   }
 
