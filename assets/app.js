@@ -23,6 +23,18 @@ function wan(v) {
 }
 function pct(a, b) { return b ? (Math.round(a / b * 1000) / 10) + '%' : '—'; }
 
+/* 热度格式化：万 / 亿 自适应（2026-10-27 加，版权方榜引入）。
+   ⛔ 不能直接复用 wan() —— wan(3051) 会显示成「0 万」
+      （MEMORY 红线：小数量级不许用 wan）。版权方榜的「总热度」是各家
+      所有剧峰值之和，榜首是 2,000 亿量级，只用万会撑爆列宽。
+   与前端的 pct 同理：同屏显示的数值只能有一处算式，别在调用点各写一遍。 */
+function reduTxt(v) {
+  if (!v) return '—';
+  if (v >= 100000000) return (Math.round(v / 10000000) / 10).toLocaleString('zh-CN') + ' 亿';
+  if (v >= 10000) return Math.round(v / 10000).toLocaleString('zh-CN') + ' 万';
+  return num(v);
+}
+
 /* 吉祥物：一本翻开的书 + 播放键，寓意「小说 → 短剧」。 */
 var MASCOT = '<svg viewBox="0 0 40 40" width="30" height="30" xmlns="http://www.w3.org/2000/svg">' +
   '<rect x="2.5" y="7" width="35" height="26" rx="5" fill="#FFD21E"/>' +
@@ -83,6 +95,11 @@ var NAV = [
     title: '概览', sub: '三平台榜首段与本期变化' },
   { key: 'fanqie_wwds', label: '番茄小说', p: 'fanqie',
     title: '番茄改编全库', sub: '全量' },
+  /* 2026-10-27 新增：CP 专区（原叫「版权方榜」，同日按用户口径改名 ——
+     业务上管制作方叫 CP）。⚠ 只有一个快照（版权方字段 20261022 期才有），
+     所以这页没有「按日期切期」，只有「按上线月份 / 剧类型 / 部数」三个筛选。 */
+  { key: 'fanqie_copyright', label: '番茄小说', p: 'fanqie',
+    title: 'CP 专区', sub: '按制作方' },
   { key: 'fanqie_hot', label: '番茄小说', p: 'fanqie',
     title: '番茄最热榜 Top50', sub: '新热榜' },
   { key: 'fanqie_peak', label: '番茄小说', p: 'fanqie',
@@ -164,6 +181,15 @@ function renderChrome() {
     line1.push('榜单数据 <b>' + esc((snap && snap.rank_date) || '—') + '</b>');
     line1.push('改编明细 <b>' + esc((snap && snap.detail_date) || '—') + '</b>');
     line1.push('收录 <b>' + num(rowN) + '</b> 本');
+  } else if (CUR === 'fanqie_copyright') {
+    /* 版权方榜是**采集日快照**，不是榜单日 —— 数据来自 playlet_detail_all 的
+       copyright 字段，没有「上游榜单哪天发的」这回事。
+       ⛔ 不许落进下面的 else 分支：那会读 snap.bangdan_ri（本页恒无）⇒ 页头显示「榜单日 —」，
+          看上去像日期丢了。日期取 snap.date（= 实际用到的那期采集日）。
+       ⛔ 也不许读 page.meta 上的字段（恒等于最新一期，切快照会错配）。 */
+    line1.push('采集日 <b>' + esc((snap && (snap.date || snap.detail_date)) || '—') + '</b>');
+    var juN = ((snap && snap.stats && snap.stats.totals) || {}).zong_ju;
+    if (juN != null) line1.push('剧级表 <b>' + num(juN) + '</b> 部');
   } else {
     /* 不再显示「在榜 N 本」—— 子标签上已经带了同一个数字，重复 */
     /* ⭐ 榜单日随改编快照切换：每期各配「<= 该快照日的最近榜单日」
@@ -582,7 +608,11 @@ function miniColsDanHtml(rows, se, unit) {
 /* ---------------- 表格通用引擎 ---------------- */
 /* 搜索 + 筛选 + 排序，tableHtml 与 tableBodyHtml 共用 */
 function filterSortRows(cfg, st) {
-  var rows = cfg.rows.slice();
+  /* 数据源本身可能随筛选变化（版权方榜按「上线月份」整块换数据集）。
+     cfg.rowsFn 是**可选**的：必须兜底回 cfg.rows，漏了会让整表空白。
+     ⛔ 别把这件事塞进 filterFn —— filterFn 只能过滤行，「换整份数据」换不了。 */
+  var src = cfg.rowsFn ? (cfg.rowsFn(st) || cfg.rows) : cfg.rows;
+  var rows = (src || []).slice();
 
   if (st.q) {
     var q = st.q.toLowerCase();
@@ -593,6 +623,9 @@ function filterSortRows(cfg, st) {
     });
   }
   if (st.filter && cfg.filterFn) rows = rows.filter(function (r) { return cfg.filterFn(r, st.filter); });
+  /* 第二筛选器（版权方榜的「剧类型」）。工具栏只有一个 <select> 位给 filters，
+     两个维度必须分开存，⛔ 不许把月份和类型拼成一个复合值去解析字符串。 */
+  if (st.filter2 && cfg.filterFn2) rows = rows.filter(function (r) { return cfg.filterFn2(r, st.filter2); });
 
   var sc = cfg.cols.filter(function (c) { return c.k === st.sort; })[0];
   if (sc) {
@@ -618,7 +651,8 @@ function sortOptValue(cfg, st) {
 function tableHtml(cfg) {
   var st = VIEW[cfg.key];
   if (!st) {
-    st = VIEW[cfg.key] = { q: '', filter: '', sort: cfg.defaultSort.k,
+    st = VIEW[cfg.key] = { q: '', filter: '', filter2: '', minju: '',
+                           sort: cfg.defaultSort.k,
                            dir: cfg.defaultSort.dir, page: 1, size: 50, open: {} };
   }
   var total = filterSortRows(cfg, st).length;
@@ -634,6 +668,27 @@ function tableHtml(cfg) {
       return '<option value="' + esc(o.v) + '"' + (st.filter === o.v ? ' selected' : '') + '>' +
              esc(o.label) + '</option>';
     }).join('') + '</select>';
+  }
+  /* 第二筛选器（可选，2026-10-27 加）。版权方榜用它做「剧类型」，
+     与上一个下拉的「上线月份」各管一个维度。
+     ⚠ st.filter2 必须兜底 ''：同会话内切页回来时 VIEW 里的老状态没有这个字段，
+       不兜底会拼出 selected 判断失效（下拉显示第一项但数据仍是上次筛选的）。 */
+  if (cfg.filters2 && cfg.filters2.length) {
+    var st2 = st.filter2 || '';
+    h += '<select id="f2_' + cfg.key + '">' + cfg.filters2.map(function (o) {
+      return '<option value="' + esc(o.v) + '"' + (st2 === o.v ? ' selected' : '') + '>' +
+             esc(o.label) + '</option>';
+    }).join('') + '</select>';
+  }
+  /* 数值阈值筛选器（可选，2026-10-27 加）。版权方榜/CP 专区用它做「改编部数 ≥ X」。
+     用户 2026-10-27 拍板：**含等号**，界面上直接把 ≥ 写出来，不留歧义。
+     ⚠ 值必须兜底 ''：老会话的 VIEW 里没有这个字段。
+     ⚠ 用 type="number" + inputmode：手机上弹数字键盘。 */
+  if (cfg.numFilter) {
+    var st3 = st[cfg.numFilter.k];
+    h += '<span class="nf"><label for="f3_' + cfg.key + '">' + esc(cfg.numFilter.label) +
+         '</label><input type="number" min="0" step="1" inputmode="numeric" id="f3_' + cfg.key +
+         '" value="' + (st3 == null || st3 === '' ? '' : esc(String(st3))) + '"></span>';
   }
   /* 排序下拉：给「常用排序维度」一个显式入口。表头点击排序依然可用，
      两者共享 st.sort/st.dir；表头排到预设之外时下拉落到 __custom 占位项。 */
@@ -694,12 +749,18 @@ function tableBodyHtml(cfg) {
     h += '<div class="tr body' + (opened ? ' open' : '') + '" data-row="' + rid +
          '" style="grid-template-columns:' + grid + '">';
     cfg.cols.forEach(function (c) {
-      var v = c.render ? c.render(r) : esc(r[c.k]);
+      /* render 的第二参 = 该行在**全表（跨页）**的 0-based 序号，给「#」名次列用。
+         老调用点直接忽略这个参数，向后兼容。
+         ⛔ 别改成页内序号（i）—— 翻页后名次会从 1 重新数，第 2 页显示 1、2、3。 */
+      var v = c.render ? c.render(r, rid) : esc(r[c.k]);
       h += '<div class="cell' + (c.type === 'num' ? ' num' : '') + (c.dim ? ' dim' : '') +
            (c.cls ? ' ' + c.cls : '') +
            '" title="' + esc(c.title ? c.title(r) : (r[c.k] == null ? '' : r[c.k])) + '">' + v + '</div>';
     });
-    h += '<div class="caret">' + (opened ? '▲' : '▼') + '</div></div>';
+    /* 没有 cfg.detail 的页不画展开箭头 —— 画了也点不开，是死控件。
+       grid 末列固定 24px 给这一格，没有箭头时给个空 div 占位，
+       否则后面几列会整体右移、跟表头对不上。 */
+    h += (cfg.detail ? '<div class="caret">' + (opened ? '▲' : '▼') + '</div>' : '<div></div>') + '</div>';
     if (opened && cfg.detail) {
       var dh = cfg.detail(r);
       if (dh) h += '<div class="detail-panel">' + dh + '</div>';
@@ -742,6 +803,18 @@ function refreshTable(cfg) {
   bindBody(cfg);                                // 表体内的事件要重新挂
 }
 
+/* 顶部汇总卡的局部重绘（2026-10-27 加，CP 专区专用）。
+   ⛔ 不许为了刷新卡片去调 renderPage() —— 那会重建整个工具栏，搜索框被换掉，
+      Windows 输入法会话随旧元素终止，用户再也打不出中文（MEMORY 老疤痕）。
+      这里只重写卡片容器的 innerHTML，工具栏一个字节都不动。
+   没配 statsFn 的页面直接跳过（其余 8 页的卡片是静态的）。 */
+function refreshStats(cfg) {
+  if (!cfg.statsFn) return;
+  var box = document.getElementById('st_' + cfg.key);
+  if (!box) return;
+  box.innerHTML = cfg.statsFn(VIEW[cfg.key]);
+}
+
 /* 工具栏事件：整页渲染后绑一次。这里的 input / select 之后都不会被重建。 */
 function bindTable(cfg) {
   var st = VIEW[cfg.key];
@@ -768,7 +841,32 @@ function bindTable(cfg) {
   var f = document.getElementById('f_' + cfg.key);
   if (f && !f._bound) {
     f._bound = 1;
-    f.onchange = function () { st.filter = f.value; st.page = 1; refreshTable(cfg); };
+    f.onchange = function () {
+      st.filter = f.value; st.page = 1;
+      refreshTable(cfg); refreshStats(cfg);      // 口径变了，汇总卡要跟着重算
+    };
+  }
+  var f2 = document.getElementById('f2_' + cfg.key);
+  if (f2 && !f2._bound) {
+    f2._bound = 1;
+    f2.onchange = function () {
+      st.filter2 = f2.value; st.page = 1;
+      refreshTable(cfg); refreshStats(cfg);
+    };
+  }
+  /* 数值阈值：用 onchange（失焦 / 回车才触发），⛔ 不用 oninput ——
+     逐字符触发会让表格和汇总卡在每敲一个数字时重绘一次，既闪又慢，
+     而且「1」→「10」中间态会把结果筛成空表。 */
+  var f3 = document.getElementById('f3_' + cfg.key);
+  if (f3 && !f3._bound) {
+    f3._bound = 1;
+    f3.onchange = function () {
+      var v = parseInt(f3.value, 10);
+      /* 空 / 0 / 非数字 = 不过滤。⛔ 不许当成「≥0」，那会把没部数的行留下。 */
+      st[cfg.numFilter.k] = (isFinite(v) && v > 0) ? v : '';
+      st.page = 1;
+      refreshTable(cfg); refreshStats(cfg);
+    };
   }
   var sz = document.getElementById('sz_' + cfg.key);
   if (sz && !sz._bound) {
@@ -1314,6 +1412,238 @@ function renderWwds(page, snap) {
     }
   };
   h += tableHtml(cfg);
+  return { html: h, bind: function () { bindTable(cfg); } };
+}
+
+/* ── 番茄版权方榜（用户 2026-10-27 新增）────────────────────────────────
+   一张表 + 三个排序维度 + 两个筛选器（上线月份 / 剧类型）。
+
+   ⛔ 口径由用户逐条拍板，改前先读 ETL 侧 `_build_fanqie_copyright_one` 的注释：
+     · 「改编短剧数」= 真人 + AI 两类都算，分两列显示
+     · 「平均改编热度」**不设最少部数门槛**，榜上会有只做 1 部的账号 ——
+       这是用户明确选择的，⛔ 别自作主张加门槛
+     · 上线月份单选；2026-10 是「在途月」，**保留但标注「不完整」**
+       ⚠ 与概览页「在途月整月剔除」是两条不同规则：那边是趋势图（缺半月会画出
+         断崖），这里是筛选器（用户要看当月中途数据）。⛔ 别把两条红线搞混。
+
+   ⛔⛔ 数据是**紧凑数组**不是对象（ETL 侧为压体积，见那边注释）：
+     rows / yue_rows 每行 = [版权方下标, 真人部数, 真人总热度, AI部数, AI总热度, 最高单剧热度]
+     版权方名在 stats.cps 里，按下标查。
+     ★ 切「上线月份」= 整块换数据集，走 cfg.rowsFn（⛔ 不是 filterFn，filterFn 换不了数据源）
+     ★ 切「剧类型」= 部数/总热度/均值都要按类型重算，所以在 rowsFn 里算好再交给表格，
+       保证「排序用的数」和「显示的数」是同一个。
+*/
+function renderFanqieCopyright(page, snap) {
+  var s = snap.stats || {};
+  var cps = s.cps || [];
+  var yueRows = s.yue_rows || {};
+  var yueBiao = s.yue_biao || [{ v: '', label: '全部月份' }];
+  var kong = s.kongru || 0;
+
+  /* 一行的实人/AI 拆分 → 当前「剧类型」视角下的 cnt / sum / avg。
+     ⛔ avg 用 Math.floor(sum/cnt)，与 ETL 侧 `s // c` 必须逐字一致
+        （MEMORY 红线：同一指标不许同屏出现两个值）。 */
+  function juXing(r, t) {
+    var c = t === 'real' ? r.real : (t === 'ai' ? r.ai : r.real + r.ai);
+    var sm = t === 'real' ? r.real_sum : (t === 'ai' ? r.ai_sum : r.real_sum + r.ai_sum);
+    return { cnt: c, sum: sm, avg: c ? Math.floor(sm / c) : 0 };
+  }
+
+  /* 解码 + 缓存：按「月份|类型」组合缓存。月份最多 45 个、类型 3 种，
+     组合数有限，不会涨爆；不缓存的话每次翻页/搜索都要重解 4,215 行。 */
+  var _hc = {};
+  function naHang(ym, t) {
+    var k = (ym || '') + '|' + (t || '');
+    if (_hc[k]) return _hc[k];
+    var src = ym ? (yueRows[ym] || []) : (snap.rows || []);
+    var out = [];
+    for (var i = 0; i < src.length; i++) {
+      var a = src[i];
+      var raw = { cp: cps[a[0]] || '（版权方缺失）',
+                  real: a[1], real_sum: a[2], ai: a[3], ai_sum: a[4], mx: a[5] };
+      var j = juXing(raw, t);
+      if (!j.cnt) continue;            // 该类型下没有剧的版权方不出现
+      out.push({ cp: raw.cp, real: raw.real, ai: raw.ai, mx: raw.mx,
+                 cnt: j.cnt, sum: j.sum, avg: j.avg });
+    }
+    _hc[k] = out;
+    return out;
+  }
+
+  /* 当前「口径」下的行：上线月份 + 剧类型 + 部数阈值三者叠加。
+     ⚠ 这里**故意不吃搜索词** —— 搜索是「在这一屏里找某一项」，不是改统计口径；
+       跟着搜索跳动会让顶上汇总卡边打字边闪，而且中文输入法组合期间会抖。
+     部数阈值比较的是**当前类型视角的部数**（类型=全部时按真人+AI 合计）。 */
+  function kouJing(st) {
+    var rows = naHang(st.filter || '', st.filter2 || '');
+    var x = st.minju;
+    if (!x) return rows;
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].cnt >= x) out.push(rows[i]);
+    }
+    return out;
+  }
+
+  /* 顶部三张汇总卡 —— 跟着口径筛选重算（用户 2026-10-27 第 3 条要求）。
+     ⛔ 不许改回读 stats.totals：那是全库值。旧版就是读 totals，
+        切到 2026-10 后表里 3,461 部、卡上仍写 43,728 部，同屏两个数打架。 */
+  function kaPian(st) {
+    var rows = kouJing(st);
+    var jia = rows.length, bu = 0, zr = 0, ai = 0;
+    for (var i = 0; i < rows.length; i++) {
+      bu += rows[i].cnt;
+      zr += rows[i].real;
+      ai += rows[i].ai;
+    }
+    var shai = [];
+    if (st.filter) shai.push(st.filter + ' 上线');
+    if (st.filter2 === 'real') shai.push('只看真人短剧');
+    else if (st.filter2 === 'ai') shai.push('只看 AI 漫剧');
+    if (st.minju) shai.push('部数 ≥ ' + st.minju);
+    var h2 = '<div class="stats stats-3">';
+    h2 += statCard('CP 家数', num(jia),
+                   shai.length ? '当前筛选：' + shai.join(' / ') : '名称按原文，未做归一');
+    h2 += statCard('参与排行的改编作品', num(bu),
+                   '已剔除 ' + num(kong) + ' 部空壳记录');
+    h2 += statCardDuo('真人短剧', num(zr), 'AI 漫剧', num(ai));
+    h2 += '</div>';
+    return h2;
+  }
+
+  var kid = page.key + '@' + (snap.date || '');
+
+  /* CP → 该 CP 名下全部剧的明细（全库口径）。
+     ⚠ 明细只存在全库 rows 里（yue_rows 不下一份，否则分片翻倍）——
+       切月份/切剧类型时回到这里查全量，再按当前筛选过一遍。
+     ⚠ snap.rows 来自分片（rows_url）：主 JSON 里是空数组，浏览器渲染前已把分片灌进来；
+       自检环境的 _harness.loadData() 做同一件事。读到空 = 分片没加载，不是没数据。 */
+  var juMap = {};
+  (snap.rows || []).forEach(function (a) { juMap[cps[a[0]]] = a[6] || []; });
+
+  /* 展开面板：每部剧一行。
+     ⛔ 必须跟着当前筛选走 —— 否则切到 2026-09（表里 7,067 部）展开一个 CP
+        却把它全年的剧列出来，数字对不上，会被读成「表算错了」。
+     ⛔ 渲染上限 ≠ 数据上限：ETL 存的是全量，这里只截显示条数，
+        以后想改这个数直接改常量，不用重跑 ETL。 */
+  var JU_MINGXI_SHANGXIAN = 100;
+  function juMingXi(r, st) {
+    var ym = (st && st.filter) || '';
+    var tp = (st && st.filter2) || '';
+    var all = juMap[r.cp] || [];
+    var lie = [];
+    for (var i = 0; i < all.length; i++) {
+      var a = all[i];
+      if (tp === 'real' && a[1]) continue;
+      if (tp === 'ai' && !a[1]) continue;
+      if (ym) {
+        var m = (a[3] || '').slice(0, 7);
+        /* 「未知」= 没有上线时间的那一桶（与 ETL 的 BANQUANFANG_YUE_WEI_ZHI 对齐）。
+           ⛔ 不能拿空字符串去 === '未知'，那是两个不同的键。 */
+        if (ym === '未知') { if (m) continue; }
+        else if (m !== ym) continue;
+      }
+      lie.push(a);
+    }
+    if (!lie.length) return '<div class="dp-title">当前筛选下没有作品</div>';
+    var chao = lie.length > JU_MINGXI_SHANGXIAN;
+    var show = chao ? lie.slice(0, JU_MINGXI_SHANGXIAN) : lie;
+    var dg = 'minmax(0,2.6fr) 58px 56px 92px 92px';
+    var x = '<div class="dp-title">该 CP ' + num(lie.length) + ' 部改编剧' +
+            (chao ? '（按最高热度降序，显示前 ' + JU_MINGXI_SHANGXIAN + ' 部）' : '') +
+            '</div>';
+    x += '<div class="dtr dhead" style="grid-template-columns:' + dg + '">' +
+         '<div>剧名</div><div>类型</div><div class="cell num">集数</div>' +
+         '<div>上线时间</div><div class="cell num">最高热度</div></div>';
+    show.forEach(function (d) {
+      x += '<div class="dtr" style="grid-template-columns:' + dg + '">' +
+           '<div class="cell" title="' + esc(d[0]) + '">' + esc(d[0]) + '</div>' +
+           '<div><span class="tag ' + (d[1] ? 't-AI' : 't-真人') + '">' +
+             (d[1] ? 'AI' : '真人') + '</span></div>' +
+           '<div class="cell num dim">' + (d[2] ? num(d[2]) : '—') + '</div>' +
+           '<div class="cell dim">' + (d[3] ? esc(d[3]) : '—') + '</div>' +
+           '<div class="cell num' + (d[4] ? ' hot' : ' dim') + '">' +
+             (d[4] ? reduTxt(d[4]) : '—') + '</div>' +
+           '</div>';
+    });
+    return x;
+  }
+
+  var cfg = {
+    key: kid,
+    /* ⚠ cfg.rows 是紧凑数组，只给 tableHtml 判「要不要显示每页条数下拉」用；
+       真正的表格数据来自 rowsFn。⛔ 别让 filterSortRows 直接吃它。 */
+    rows: snap.rows || [],
+    rowsFn: kouJing,
+    /* 顶上汇总卡也随筛选重算。refreshStats 只重写这个容器的 innerHTML，
+       ⛔ 不动工具栏 —— 那里面的搜索框绝对不能被重建（IME 会断）。 */
+    statsFn: kaPian,
+    defaultSort: { k: 'cnt', dir: 'desc' },
+    sortOptions: [
+      { k: 'cnt', dir: 'desc', label: '按改编短剧数量' },
+      { k: 'avg', dir: 'desc', label: '按平均改编热度' },
+      { k: 'sum', dir: 'desc', label: '按总改编热度' },
+      /* 2026-10-27 用户要求：按「名下所有改编剧中的最高一部」排。
+         表头点「最高单剧」也能排到同一结果，但用户要的是下拉里能选。 */
+      { k: 'mx', dir: 'desc', label: '按最高单剧热度' }
+    ],
+    /* 点 CP 名展开该 CP 的剧级明细（2026-10-27 用户要求，与改编全库的展开面板同款） */
+    detail: function (r) { return juMingXi(r, VIEW[kid]); },
+    searchKeys: ['cp'],
+    /* 前面的空格是**故意的**：模板是 `'搜索' + hint`，其余页的 hint 都是中文
+       （「书名 / 作者」），中式排版不加空格；这里 hint 以拉丁字母开头，
+       不加会拼成「搜索CP 名称」，中间那个空格看着像错位。 */
+    searchHint: ' CP 名称',
+    rowId: function (r) { return r.cp; },
+    /* 月份选项的文案（含「不完整」标注）全部由 ETL 拼好，⛔ 前端不许自己拼。 */
+    filters: yueBiao,
+    filters2: [
+      { v: '', label: '全部剧类型' },
+      { v: 'real', label: '只看真人短剧' },
+      { v: 'ai', label: '只看 AI 漫剧' }
+    ],
+    /* 部数阈值：手输，≥ 判定（用户 2026-10-27 拍板"含等号"）。 */
+    numFilter: { k: 'minju', label: '改编部数 ≥' },
+    cols: [
+      /* 「#」= 当前排序下的名次。用 render 第二参（跨页 0-based 序号），
+         ⛔ 不能用数组下标 i —— 翻页后会从 1 重新数。 */
+      { k: '_paiming', label: '#', w: '46px', type: 'num', sortable: false,
+        render: function (r, rid) { return '<span class="rankno">' + (rid + 1) + '</span>'; } },
+      { k: 'cp', label: 'CP', w: 'minmax(0,2.4fr)', type: 'text', cls: 'name' },
+      /* 部数一律过 num() 加千分位：本页部数会到 8,696，而同一张卡上方的 statCard
+         也写着「4,191」，两处一个带逗号一个不带会被读成不同量级的两个人写的。
+         （其它页部数是几十几百，肉眼不加逗号也读得出来，故未统一改。） */
+      { k: 'cnt', label: '改编短剧', w: '84px', type: 'num',
+        render: function (r) { return num(r.cnt); } },
+      { k: 'real', label: '真人短剧', w: '78px', type: 'num', dim: true,
+        render: function (r) { return num(r.real); } },
+      { k: 'ai', label: 'AI 漫剧', w: '68px', type: 'num', dim: true,
+        render: function (r) { return num(r.ai); } },
+      { k: 'avg', label: '平均热度', w: '96px', type: 'num', cls: 'hot',
+        render: function (r) { return reduTxt(r.avg); } },
+      { k: 'sum', label: '总热度', w: '96px', type: 'num',
+        render: function (r) { return reduTxt(r.sum); } },
+      { k: 'mx', label: '最高单剧', w: '92px', type: 'num', dim: true,
+        render: function (r) { return reduTxt(r.mx); } }
+    ]
+  };
+
+  /* ⚠ 必须先跑 tableHtml —— 它会建好 VIEW[cfg.key]（含默认排序），
+     后面的汇总卡要读这份 st。顺序反了会读到 undefined。 */
+  var biao = tableHtml(cfg);
+
+  var h = notesHtml(page);
+  h += '<div id="st_' + kid + '">' + kaPian(VIEW[kid]) + '</div>';
+  h += biao;
+  h += '<div class="footnote">平均改编热度＝该 CP 名下全部改编剧「红果最高热度」之和 ÷ 部数，'
+     + '不按上线月份加权。总热度是各家所有剧峰值热度之和，量级远高于单剧热度，用「亿」显示。'
+     + '「改编部数 ≥ X」只筛掉部数不够的 CP 行，不改变任何一家自己的部数与热度 ——'
+     + '受影响的是名次、榜首人选和上方三张汇总卡，不会是行内的数。'
+     + '点 CP 名可展开它名下的剧级明细（按最高热度降序；超过 100 部只显示前 100 部），'
+     + '展开的内容同样跟随上面的月份 / 剧类型筛选。'
+     + '名称完全相同才合并；同一实体的不同写法（如「灵矩动漫」与「杭州灵矩动漫文化传媒有限公司」）'
+     + '各自成行，不做自动归并。</div>';
+  h += insightsHtml(snap.insights);
   return { html: h, bind: function () { bindTable(cfg); } };
 }
 
@@ -2322,6 +2652,7 @@ function renderPage(keepScroll) {
     var out;
     if (key === 'fanqie_hot' || key === 'fanqie_peak') out = renderFanqieBoard(page, snap);
     else if (key === 'fanqie_wwds') out = renderWwds(page, snap);
+    else if (key === 'fanqie_copyright') out = renderFanqieCopyright(page, snap);
     else out = renderCopyrightBoard(page, snap);
     main.innerHTML = out.html;
     out.bind();
