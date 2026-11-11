@@ -95,6 +95,11 @@ var NAV = [
     title: '概览', sub: '三平台榜首段与本期变化' },
   { key: 'fanqie_wwds', label: '番茄小说', p: 'fanqie',
     title: '番茄改编全库', sub: '全量' },
+  /* 2026-11-09 新增：爆款题材（剧级视角）。
+     ⚠ 与「番茄改编全库 · 题材改编热度」是**两个视角**：那边一本书只看表现最好的
+       那一部（书级），这边每一部改编剧各算一次（剧级）。⛔ 别把两页的数横着比。 */
+  { key: 'fanqie_baokuan', label: '番茄小说', p: 'fanqie',
+    title: '爆款题材', sub: '按题材 · 剧级' },
   /* 2026-10-27 新增：CP 专区（原叫「版权方榜」，同日按用户口径改名 ——
      业务上管制作方叫 CP）。⚠ 只有一个快照（版权方字段 20261022 期才有），
      所以这页没有「按日期切期」，只有「按上线月份 / 剧类型 / 部数」三个筛选。 */
@@ -190,6 +195,13 @@ function renderChrome() {
     line1.push('采集日 <b>' + esc((snap && (snap.date || snap.detail_date)) || '—') + '</b>');
     var juN = ((snap && snap.stats && snap.stats.totals) || {}).zong_ju;
     if (juN != null) line1.push('剧级表 <b>' + num(juN) + '</b> 部');
+  } else if (CUR === 'fanqie_baokuan') {
+    /* 爆款题材同样是**采集日快照**（数据源 = playlet_detail_all 明细）。
+       ⛔ 同 CP 专区：不许落进下面的 else 分支读 snap.bangdan_ri（本页恒无），
+          那会显示「榜单日 —」，看起来像日期丢了。 */
+    line1.push('采集日 <b>' + esc((snap && (snap.date || snap.detail_date)) || '—') + '</b>');
+    var bkJu = (snap && snap.stats && snap.stats.ju_total) || 0;
+    if (bkJu) line1.push('剧级表 <b>' + num(bkJu) + '</b> 部');
   } else {
     /* 不再显示「在榜 N 本」—— 子标签上已经带了同一个数字，重复 */
     /* ⭐ 榜单日随改编快照切换：每期各配「<= 该快照日的最近榜单日」
@@ -606,6 +618,12 @@ function miniColsDanHtml(rows, se, unit) {
 }
 
 /* ---------------- 表格通用引擎 ---------------- */
+/* cfg.cols / cfg.sortOptions 既可以传数组，也可以传「返回数组的函数」。
+   传函数是为了「列随筛选变化」的页面（番茄爆款题材：选了具体月份才出现
+   「VS 上月 GAP」列和对应排序项）。其余 8 页仍传数组，走这里原样返回，行为不变。
+   ⛔ 别在调用点各写一份 typeof 判断 —— 一处漏掉就是「列不出现」或「排序静默失效」。 */
+function _arr(v) { return typeof v === 'function' ? (v() || []) : (v || []); }
+
 /* 搜索 + 筛选 + 排序，tableHtml 与 tableBodyHtml 共用 */
 function filterSortRows(cfg, st) {
   /* 数据源本身可能随筛选变化（版权方榜按「上线月份」整块换数据集）。
@@ -627,7 +645,7 @@ function filterSortRows(cfg, st) {
      两个维度必须分开存，⛔ 不许把月份和类型拼成一个复合值去解析字符串。 */
   if (st.filter2 && cfg.filterFn2) rows = rows.filter(function (r) { return cfg.filterFn2(r, st.filter2); });
 
-  var sc = cfg.cols.filter(function (c) { return c.k === st.sort; })[0];
+  var sc = _arr(cfg.cols).filter(function (c) { return c.k === st.sort; })[0];
   if (sc) {
     var d = st.dir === 'asc' ? 1 : -1;
     rows.sort(function (a, b) {
@@ -642,10 +660,29 @@ function filterSortRows(cfg, st) {
 /* 当前排序是否命中 cfg.sortOptions 里的某一项，返回其 value（"k:dir"）或 ''。 */
 function sortOptValue(cfg, st) {
   var hit = '';
-  (cfg.sortOptions || []).forEach(function (o) {
+  _arr(cfg.sortOptions).forEach(function (o) {
     if (st.sort === o.k && st.dir === o.dir) hit = o.k + ':' + o.dir;
   });
   return hit;
+}
+
+/* 排序下拉的选项集合签名。refreshTable 靠它判断「要不要重建 options」——
+   选项会随筛选变的页面（爆款题材的 GAP 项）才需要重建，其余页面签名恒定。 */
+function sortSig(cfg) {
+  return _arr(cfg.sortOptions).map(function (o) {
+    return o.k + ':' + o.dir + '|' + o.label;
+  }).join(';');
+}
+
+/* 排序下拉的 options 片段。st 传了就把当前项标 selected（首次渲染用）；
+   不传则由调用方直接设 .value（局部刷新用，避免 selected 与 value 打架）。 */
+function sortOptsHtml(cfg, st) {
+  return _arr(cfg.sortOptions).map(function (o) {
+    var sel = (st && st.sort === o.k && st.dir === o.dir) ? ' selected' : '';
+    return '<option value="' + esc(o.k + ':' + o.dir) + '"' + sel + '>' + esc(o.label) + '</option>';
+  }).join('') +
+  '<option value="__custom" disabled' + ((st && !sortOptValue(cfg, st)) ? ' selected' : '') +
+  '>其他（点表头排序）</option>';
 }
 
 function tableHtml(cfg) {
@@ -691,16 +728,11 @@ function tableHtml(cfg) {
          '" value="' + (st3 == null || st3 === '' ? '' : esc(String(st3))) + '"></span>';
   }
   /* 排序下拉：给「常用排序维度」一个显式入口。表头点击排序依然可用，
-     两者共享 st.sort/st.dir；表头排到预设之外时下拉落到 __custom 占位项。 */
-  if (cfg.sortOptions && cfg.sortOptions.length) {
-    h += '<select id="so_' + cfg.key + '">' + cfg.sortOptions.map(function (o) {
-      var v = o.k + ':' + o.dir;
-      return '<option value="' + esc(v) + '"' +
-             (st.sort === o.k && st.dir === o.dir ? ' selected' : '') + '>' +
-             esc(o.label) + '</option>';
-    }).join('') +
-    '<option value="__custom" disabled' + (sortOptValue(cfg, st) ? '' : ' selected') +
-    '>其他（点表头排序）</option></select>';
+     两者共享 st.sort/st.dir；表头排到预设之外时下拉落到 __custom 占位项。
+     data-sig 记下当前选项集合，refreshTable 据此判断换筛选后要不要重建 options。 */
+  if (_arr(cfg.sortOptions).length) {
+    h += '<select id="so_' + cfg.key + '" data-sig="' + esc(sortSig(cfg)) + '">' +
+         sortOptsHtml(cfg, st) + '</select>';
   }
   h += '<div class="spacer"></div><span class="hint" id="cnt_' + cfg.key + '">共 ' +
        num(total) + ' 条</span>';
@@ -728,10 +760,11 @@ function tableBodyHtml(cfg) {
   var pages = Math.max(1, Math.ceil(total / st.size));
   if (st.page > pages) st.page = pages;
   var slice = rows.slice((st.page - 1) * st.size, st.page * st.size);
-  var grid = cfg.cols.map(function (c) { return c.w; }).join(' ') + ' 24px';
+  var cols = _arr(cfg.cols);
+  var grid = cols.map(function (c) { return c.w; }).join(' ') + ' 24px';
 
   var h = '<div class="tbl"><div class="tr head" style="grid-template-columns:' + grid + '">';
-  cfg.cols.forEach(function (c) {
+  cols.forEach(function (c) {
     var on = st.sort === c.k;
     h += '<div class="cell' + (c.type === 'num' ? ' num' : '') +
          (c.sortable === false ? '' : ' sortable' + (on ? ' on' : '')) +
@@ -748,7 +781,7 @@ function tableBodyHtml(cfg) {
     var opened = !!st.open[cfg.rowId ? cfg.rowId(r) : r.name];
     h += '<div class="tr body' + (opened ? ' open' : '') + '" data-row="' + rid +
          '" style="grid-template-columns:' + grid + '">';
-    cfg.cols.forEach(function (c) {
+    cols.forEach(function (c) {
       /* render 的第二参 = 该行在**全表（跨页）**的 0-based 序号，给「#」名次列用。
          老调用点直接忽略这个参数，向后兼容。
          ⛔ 别改成页内序号（i）—— 翻页后名次会从 1 重新数，第 2 页显示 1、2、3。 */
@@ -793,13 +826,33 @@ function tableBodyHtml(cfg) {
 function refreshTable(cfg) {
   var box = document.getElementById('tb_' + cfg.key);
   if (!box) { renderPage(true); return; }      // 结构不在（切页了），退回整页
+  var st = VIEW[cfg.key];
+  /* 列会随筛选变的页面（番茄爆款题材：换到「全部月份」时 GAP 列整列消失），
+     原来那个排序列可能已经不存在。失效就退回默认排序 ——
+     ⛔ 不退回的话 filterSortRows 找不到列 ⇒ 静默变成「完全不排序」，
+     表看着还有序（其实是 ETL 的天然顺序），没人会发现排错了。
+     只有 cfg.cols 传函数时才检查；其余页面 cols 恒定，不进这个分支。 */
+  if (typeof cfg.cols === 'function' && cfg.defaultSort &&
+      !_arr(cfg.cols).some(function (c) { return c.k === st.sort; })) {
+    st.sort = cfg.defaultSort.k;
+    st.dir = cfg.defaultSort.dir;
+  }
   box.innerHTML = tableBodyHtml(cfg);
   var cnt = document.getElementById('cnt_' + cfg.key);
   if (cnt) cnt.textContent = '共 ' + num(filterSortRows(cfg, VIEW[cfg.key]).length) + ' 条';
   /* 工具栏不重建，所以点表头排序后要手动把排序下拉拨到对应项；
-     排到预设之外时落到 __custom 占位项，避免下拉显示成一个错的维度。 */
+     排到预设之外时落到 __custom 占位项，避免下拉显示成一个错的维度。
+     ⚠ 选项集合也可能随筛选变（爆款题材的 GAP 项）⇒ 签名变了才重建 options。
+       其余页面签名恒定，每页只多一次字符串比较，不重建。 */
   var so2 = document.getElementById('so_' + cfg.key);
-  if (so2) so2.value = sortOptValue(cfg, VIEW[cfg.key]) || '__custom';
+  if (so2) {
+    var sig = sortSig(cfg);
+    if (so2.getAttribute('data-sig') !== sig) {
+      so2.innerHTML = sortOptsHtml(cfg);
+      so2.setAttribute('data-sig', sig);
+    }
+    so2.value = sortOptValue(cfg, VIEW[cfg.key]) || '__custom';
+  }
   bindBody(cfg);                                // 表体内的事件要重新挂
 }
 
@@ -1781,6 +1834,262 @@ function bindDaiQianYue(d, plat, pageKey) {
   });
 }
 
+/* ── 番茄·爆款题材（用户 2026-11-09 新增；剧级视角）──────────────────────
+   两张各自排序的柱图 + 一张趋势小多图 + 一张明细表。
+
+   ⛔⛔ 与「番茄改编全库 · 题材改编热度」是两个不同的业务问题，不许横着比：
+     书级（那页）：一本书有多个改编时只看热度最高的那一部 ⇒ 一本书算一次
+     剧级（本页）：红果上每一部改编剧各算一次           ⇒ 一部剧算一次
+   同一本书有 92 部改编剧时，书级计 1，本页计 92。页底脚注和 ⓘ 浮窗都要写清这点。
+
+   ⛔ 两张柱图不许合成一张并排图（2026-10-20 定案）：两榜各自排序得到的 Top10
+     实测是两批完全不同的题材 —— 并排图会逼着「天花板高」的题材按「整体水位」排队。
+
+   ⚠ 筛选（剧类型 / 上线月份）的组合由 ETL 预算好（3 × 14 套），前端**只查表**。
+     ⛔ 别把排序挪到前端：排序是口径（见 ETL 侧 _build_fanqie_baokuan_one 注释）。
+   ⚠ 切筛选要重画图 ⇒ 图和汇总卡都塞进 statsFn（refreshStats 只重写 st_ 容器）。
+     ⛔ 不许为了刷新卡片去调 renderPage()：那会重建工具栏，搜索框被换掉，
+        中文输入法会话随旧元素终止（MEMORY 老疤痕）。
+*/
+function renderFanqieBaokuan(page, snap) {
+  var s = snap.stats || {};
+  var cats = s.cats || [];
+  var xingMap = s.xing || {};
+  var yueBiao = s.yue_biao || [{ v: '', label: '全部月份' }];
+  var kid = page.key + '@' + (snap.date || '');
+  var MINJU = s.min_ju || 50;
+  var TOPNJ = s.top_n_ju || 20;
+
+  function ming(i) { return cats[i] || '（题材缺失）'; }
+  function yueTxt(ym) {
+    for (var i = 0; i < yueBiao.length; i++) if (yueBiao[i].v === ym) return yueBiao[i].label;
+    return ym;
+  }
+
+  /* 当前「剧类型」视角。⚠ st.filter2 必须兜底 ''（老会话的 VIEW 里没这个字段）。 */
+  function xingOf(st) {
+    var t = (st && st.filter2) || '';
+    return xingMap[t] || xingMap[''] ||
+      { label: '全部', pool: 0, ju: 0, yue: {}, gap_yue: [], gap_shang: {} };
+  }
+  /* 当前「剧类型 × 上线月份」那一套已排好的榜。 */
+  function zuOf(st) {
+    var z = (xingOf(st).yue || {})[(st && st.filter) || ''];
+    return z || { all: [], quan: [], tou: [] };
+  }
+  /* 当前筛选下能不能算 GAP：必须是「具体某个月」且它的上一个月也在数据里。
+     ⛔ 前端绝不许自己拿月份字符串减一（跨年、单数月份都会错）——
+       能不能算由 ETL 的 gap_yue 说了算，「上月是几月」由 gap_shang 给。 */
+  function gapYueOf(st) {
+    var x = xingOf(st), ym = (st && st.filter) || '';
+    return (x.gap_yue || []).indexOf(ym) >= 0 ? ym : '';
+  }
+  function gapShangTxt(st) {
+    var ym = gapYueOf(st);
+    return ym ? ((xingOf(st).gap_shang || {})[ym] || '上月') : '';
+  }
+  function shaiTxt(st) {
+    var a = [];
+    var ym = (st && st.filter) || '';
+    a.push(ym ? yueTxt(ym) : '全部月份');
+    a.push(xingTxt(st));
+    return a.join(' / ');
+  }
+  function xingTxt(st) {
+    if (st && st.filter2 === 'real') return '只看真人短剧';
+    if (st && st.filter2 === 'ai') return '只看 AI 漫剧';
+    return '全部剧类型';
+  }
+
+  /* 汇总卡 + 两张柱图。合在一个函数里是因为三者都随筛选变，
+     而 refreshStats 只能重写一个容器（st_）—— 拆开会有一半不刷新。 */
+  function kaPian(st) {
+    var x = xingOf(st), z = zuOf(st);
+    var bu = 0;
+    z.all.forEach(function (r) { bu += r[1]; });
+
+    var h2 = '<div class="stats stats-3">';
+    h2 += statCard('题材池', num(x.pool) + ' 个',
+                   '当前剧类型下累计改编 ≥ ' + MINJU + ' 部的题材；累计口径，不随月份变');
+    h2 += statCard('参与排行的改编剧', num(bu) + ' 部',
+                   '当前筛选：' + shaiTxt(st) + '｜剧级计数，一部改编剧算一次');
+    /* 第三张卡给「真人 / AI」拆分。
+       ⛔ 不许改成「题材池全部改编剧」—— 月份选「全部」时它和左边那张完全相同，
+          同屏两个一模一样的数会被读成算错了。 */
+    var ymKey = (st && st.filter) || '';
+    var zrN = 0, aiN = 0;
+    if (ymKey === '') {
+      zrN = (xingMap.real || {}).ju || 0;
+      aiN = (xingMap.ai || {}).ju || 0;
+    } else {
+      (((xingMap.real || {}).yue || {})[ymKey] || { all: [] }).all
+        .forEach(function (r) { zrN += r[1]; });
+      (((xingMap.ai || {}).yue || {})[ymKey] || { all: [] }).all
+        .forEach(function (r) { aiN += r[1]; });
+    }
+    h2 += statCardDuo('真人短剧', num(zrN), 'AI 漫剧', num(aiN));
+    h2 += '</div>';
+
+    /* 两张柱图各自排序、各自取前 N —— 数据来自 ETL，前端不重排。 */
+    var ka = [];
+    if (z.quan.length) {
+      ka.push(cardHtml('剧级题材热度 · 整体水位',
+        '该题材全部已改编剧的平均最高热度；题材池 ' + num(x.pool) + ' 个中按该指标取前 ' +
+        z.quan.length + '｜' + shaiTxt(st),
+        miniColsDanHtml(z.quan.map(function (r) {
+          return { k: ming(r[0]), v: r[2], t: wan(r[2]) + '（' + num(r[1]) + ' 部）' };
+        }), 'var(--fanqie)', '纵轴为该题材全部已改编剧的平均最高热度')));
+    }
+    if (z.tou.length) {
+      ka.push(cardHtml('剧级题材热度 · 上限',
+        '该题材热度最高的前 ' + TOPNJ + ' 部剧的平均热度；同样题材池、同样门槛，' +
+        '按该指标取前 ' + z.tou.length + ' —— 与左图不是同一批题材｜' + shaiTxt(st),
+        miniColsDanHtml(z.tou.map(function (r) {
+          return { k: ming(r[0]), v: r[4],
+                   t: wan(r[4]) + '（取前 ' + r[3] + ' 部，该题材共 ' + num(r[1]) + ' 部）' };
+        }), '#7C2D12', '纵轴为该题材热度前 ' + TOPNJ + ' 部剧的平均最高热度')));
+    }
+    if (ka.length === 2) h2 += '<div class="grid2">' + ka.join('') + '</div>';
+    else if (ka.length === 1) h2 += ka[0];
+
+    /* 「前 N 题材 · 月度均热趋势」小多图 2026-11-09 上线后当场被用户否掉：
+       「TOP20 里的题材趋势基本都差不多，没啥信息量」。
+       ⇒ 已整块删除（连同 ETL 的 qu 字段 / BAOKUAN_QU_XIAN / BAOKUAN_YUE_MIN_JU）。
+       ⛔ 别再画回来。要看月度变化读明细表的「VS 上月 GAP」列 —— 那个是每个题材
+          自己跟自己的上个月比，才有信息量。 */
+    return h2;
+  }
+
+  /* 表格行：把紧凑数组 [题材下标, 部数, 整体均热, 前N参与数, 前N均热, VS上月GAP]
+     解成对象。
+     ⚠ 只在「剧类型 × 月份」换组合时重算一次，按组合缓存 —— 翻页/搜索不必重解。 */
+  var _hc = {};
+  function naHang(st) {
+    var k = ((st && st.filter2) || '') + '|' + ((st && st.filter) || '');
+    if (_hc[k]) return _hc[k];
+    var out = zuOf(st).all.map(function (r) {
+      var g = (r[5] == null ? null : r[5]);
+      return {
+        cat: ming(r[0]), ju: r[1], jun: r[2], tn: r[3], tou: r[4],
+        gap: g,
+        /* 排序专用字段（列头 data-sort 指向它，显示仍用 gap）。
+           ⚠ 为什么不让排序直接吃 gap：`filterSortRows` 把 null 当 0
+             （`Number(null)||0`），倒排时「上月没样本」的行会插在负增长行前面，
+             看起来像「跌的题材排在了涨的下面 —— 其实它是一个没数的行」。
+             这里给个足够小的哨兵值把它压到最后。热度量级 ≤ 1e9，−1e15 不可能撞上。
+           ⛔ 别把这个数字当指标展示（title / 单元格都用 gap，不用 gap_pai）。 */
+        gap_pai: (g == null ? -1e15 : g)
+      };
+    });
+    _hc[k] = out;
+    return out;
+  }
+
+  /* GAP 单元格：正红负绿（中国习惯），null 显示「—」。
+     ⛔ 不许把 null 渲染成 0 ——「上月没样本」和「真的一点没变」是两件事，
+        当 0 算会读成「这个题材上月也在、只是没涨」。 */
+  function gapTxt(g) {
+    if (g == null) return '';
+    var a = Math.round(Math.abs(g) / 10000);
+    if (!a) return '0 万';                    // 差额不足 1 万，标中性色
+    return (g > 0 ? '+' : '-') + num(a) + ' 万';
+  }
+  function gapHtml(g) {
+    if (g == null) return '<span class="dim">—</span>';
+    if (!Math.round(Math.abs(g) / 10000)) return '<span class="dim">' + gapTxt(g) + '</span>';
+    return '<span style="color:' + (g > 0 ? 'var(--up)' : 'var(--down)') + '">' +
+           gapTxt(g) + '</span>';
+  }
+
+  /* cols / sortOptions 传的是**函数**而不是数组：GAP 列与 GAP 排序项只在
+     「选了具体某个月且该月的上个月在数据里」时存在。
+     ⚠ 引擎用 _arr() 解析，调用时不传参 ⇒ 这里必须现读 VIEW[kid]，
+       不许在页面渲染时把 st 捕获成闭包常量（换筛选后就不更新了）。 */
+  function curSt() { return VIEW[kid] || {}; }
+
+  function colsOf() {
+    var st = curSt();
+    var c = [
+      { k: '_paiming', label: '#', w: '46px', type: 'num', sortable: false,
+        render: function (r, rid) { return '<span class="rankno">' + (rid + 1) + '</span>'; } },
+      { k: 'cat', label: '原著题材', w: 'minmax(0,2fr)', type: 'text', cls: 'name' },
+      { k: 'ju', label: '改编剧数', w: '92px', type: 'num',
+        render: function (r) { return num(r.ju); } },
+      { k: 'jun', label: '整体均热', w: '104px', type: 'num', cls: 'hot',
+        render: function (r) { return wan(r.jun); } },
+      /* 「前 N 部均热」列头带上 N 和实际参与部数，避免读者以为一律按 20 部算。
+         列头是静态文案，N 来自 ETL 常量 ⇒ 改常量时列头自动跟随。 */
+      { k: 'tou', label: '前 ' + TOPNJ + ' 部均热', w: '124px', type: 'num',
+        render: function (r) { return wan(r.tou) + ' <small>(' + r.tn + ' 部)</small>'; } }
+    ];
+    /* GAP 列：只有筛了具体某个月才出现（用户 2026-11-09 要求）。
+       列头写出被减的那个月（ETL 的 gap_shang 给），⛔ 前端不推月份。
+       ⚠ k 用 gap_pai（排序哨兵，见 naHang），显示用 render 里的 gap。 */
+    if (gapYueOf(st)) {
+      c.push({ k: 'gap_pai', label: 'VS ' + gapShangTxt(st) + ' GAP', w: '136px', type: 'num',
+               render: function (r) { return gapHtml(r.gap); },
+               title: function (r) { return gapTxt(r.gap); } });
+    }
+    return c;
+  }
+
+  function sortOptsOf() {
+    var ops = [
+      { k: 'ju', dir: 'desc', label: '按改编剧数量' },
+      { k: 'jun', dir: 'desc', label: '按整体均热' },
+      { k: 'tou', dir: 'desc', label: '按前 ' + TOPNJ + ' 部均热' }
+    ];
+    /* 排序项跟着列走：没有 GAP 列时不给这一项，否则选了它等于「按一个看不见的列排」。
+       排序方向固定倒排（涨得最多在前），所以是单一项、不带 asc 版本。 */
+    if (gapYueOf(curSt())) {
+      ops.push({ k: 'gap_pai', dir: 'desc', label: '按 VS 上月 GAP 倒排（涨得最多在前）' });
+    }
+    return ops;
+  }
+
+  var cfg = {
+    key: kid,
+    /* ⚠ cfg.rows 只给 tableHtml 判「要不要显示每页条数下拉」；
+       真正的数据来自 rowsFn。⛔ 别让 filterSortRows 直接吃 snap.rows（它是空的）。 */
+    rows: snap.rows || [],
+    rowsFn: naHang,
+    statsFn: kaPian,
+    defaultSort: { k: 'ju', dir: 'desc' },
+    /* 函数形式：GAP 项只在筛了具体月份时出现（见 sortOptsOf / colsOf 的注释）。
+       引擎在 refreshTable 里按选项签名重建下拉，⛔ 前端不必自己重画工具栏。 */
+    sortOptions: sortOptsOf,
+    searchKeys: ['cat'],
+    searchHint: '题材',
+    rowId: function (r) { return r.cat; },
+    /* 月份选项（含「不完整」标注）全部由 ETL 拼好，⛔ 前端不许自己拼。 */
+    filters: yueBiao,
+    filters2: [
+      { v: '', label: '全部剧类型' },
+      { v: 'real', label: '只看真人短剧' },
+      { v: 'ai', label: '只看 AI 漫剧' }
+    ],
+    cols: colsOf
+  };
+
+  /* ⚠ 必须先跑 tableHtml —— 它会建好 VIEW[cfg.key]（含默认排序），
+     后面的汇总卡和图要读这份 st。顺序反了会读到 undefined。 */
+  var biao = tableHtml(cfg);
+
+  var h = notesHtml(page);
+  h += '<div id="st_' + kid + '">' + kaPian(VIEW[kid]) + '</div>';
+  h += biao;
+  /* 页底脚注：用户明确要求「与书级题材改编热度逐条区分」要写在专区下方。
+     这里只放最短的三条差异，完整口径在 ⓘ 浮窗里（⛔ 两处内容不许互相矛盾）。 */
+  h += '<div class="footnote">与「番茄改编全库」页的「题材改编热度」逐条对应，别横着比：'
+     + '① 单位不同 —— 那两张是「书级」，一本书有多个改编时只取热度最高的那一部，一本书算一次；'
+     + '本页是「剧级」，每一部改编剧各算一次。'
+     + '② 门槛不同 —— 书级按书数（≥150 本），本页按剧数（累计 ≥' + MINJU + ' 部）。'
+     + '③ 维度不同 —— 书级没有月份维度；本页可按上线月份切，切月份只换参与计算的剧，'
+     + '题材池（累计口径）不变，所以某月可能有个别题材当月一部都没有、不参与当月排名。'
+     + '热度一律用红果「最高热度」（历史峰值，非最新值）。</div>';
+  return { html: h, bind: function () { bindTable(cfg); } };
+}
+
 /* ---------------- 页面：起点 / 晋江 ---------------- */
 function renderCopyrightBoard(page, snap) {
   var s = snap.stats || {}, m = page.meta || {};
@@ -2653,6 +2962,7 @@ function renderPage(keepScroll) {
     if (key === 'fanqie_hot' || key === 'fanqie_peak') out = renderFanqieBoard(page, snap);
     else if (key === 'fanqie_wwds') out = renderWwds(page, snap);
     else if (key === 'fanqie_copyright') out = renderFanqieCopyright(page, snap);
+    else if (key === 'fanqie_baokuan') out = renderFanqieBaokuan(page, snap);
     else out = renderCopyrightBoard(page, snap);
     main.innerHTML = out.html;
     out.bind();
