@@ -369,6 +369,9 @@ a { color: inherit; text-decoration: none; }
 .toolbar .nf input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .toolbar .spacer { flex: 1; }
 .toolbar .hint { font-size: 13px; color: var(--ink-3); font-weight: 600; }
+/* 整页口径筛选栏（2026-11-16 爆款题材页）：从表格工具栏拆出来，放在汇总卡与图表上方。
+   与下方卡片拉开一点距离，免得被读成第一张卡的一部分。 */
+.toolbar.toolbar-kj { margin-bottom: 14px; }
 
 /* ============ 表格 ============ */
 /* 注意：容器不能用 overflow:hidden —— 会让内部 position:sticky 的表头失效并浮空
@@ -399,6 +402,11 @@ a { color: inherit; text-decoration: none; }
 .cell.dim { color: var(--ink-3); }
 .cell.name { font-weight: 600; }
 .cell.hot { color: var(--up); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* 头部非独家爆款「是否平台独家」列（2026-11-15）：文字长（「非独家概率高，内容团队可尝试建联」），
+   允许换行，⛔ 不许被 .cell 的单行省略截成「非独家概率高，内…」—— 后半句才是行动建议。 */
+.cell.fdj-pan { white-space: normal; line-height: 1.35; text-align: left; }
+.cell.fdj-pan .fdj-du { color: var(--ink-3); font-weight: 600; }
+.cell.fdj-pan .fdj-fei { color: var(--fanqie); font-weight: 700; }
 .rankno {
   font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12.5px;
   color: var(--ink-3);
@@ -413,6 +421,11 @@ a { color: inherit; text-decoration: none; }
   border-bottom: 1px solid var(--line-strong); padding-bottom: 5px;
 }
 .detail-panel .dtr:not(.dhead) { border-top: 1px solid var(--line); }
+/* 爆款题材展开面板：「本月 / 上月」左右并排（2026-11-13）。窄屏自动叠成上下两栏。
+   ⚠ 不复用 .grid2 —— 那是卡片并排的类，_tubiao_check 会按「卡片等高」去量它。 */
+.detail-panel .bk-mx2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px; }
+.detail-panel .bk-mx2 > div { min-width: 0; }
+.detail-panel .bk-mx2 .cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail-panel .kv { font-size: 13px; color: var(--ink-2); }
 .detail-panel .kv b { font-weight: 700; color: var(--ink); }
 .detail-panel .kv a { color: var(--qidian); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }

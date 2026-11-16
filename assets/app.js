@@ -100,6 +100,9 @@ var NAV = [
        那一部（书级），这边每一部改编剧各算一次（剧级）。⛔ 别把两页的数横着比。 */
   { key: 'fanqie_baokuan', label: '番茄小说', p: 'fanqie',
     title: '爆款题材', sub: '按题材 · 剧级' },
+  /* 2026-11-15 新增：头部非独家爆款（Sandra 红果漫剧每日 Top30 × 番茄改编库剧名匹配）。 */
+  { key: 'fanqie_feidujia', label: '番茄小说', p: 'fanqie',
+    title: '头部非独家爆款', sub: '红果漫剧 Top30' },
   /* 2026-10-27 新增：CP 专区（原叫「版权方榜」，同日按用户口径改名 ——
      业务上管制作方叫 CP）。⚠ 只有一个快照（版权方字段 20261022 期才有），
      所以这页没有「按日期切期」，只有「按上线月份 / 剧类型 / 部数」三个筛选。 */
@@ -202,6 +205,15 @@ function renderChrome() {
     line1.push('采集日 <b>' + esc((snap && (snap.date || snap.detail_date)) || '—') + '</b>');
     var bkJu = (snap && snap.stats && snap.stats.ju_total) || 0;
     if (bkJu) line1.push('剧级表 <b>' + num(bkJu) + '</b> 部');
+  } else if (CUR === 'fanqie_feidujia') {
+    /* 两个日期：榜单区间（Sandra）+ 剧级明细采集日（= 榜单截止日）。
+       ⛔ 同 CP 专区：不许落进下面的 else 分支读 snap.bangdan_ri（本页恒无）。 */
+    var fs = (snap && snap.stats) || {};
+    line1.push('榜单 <b>' + esc((fs.ri_qi || '—') + ' 至 ' + (fs.jie_zhi || '—')) + '</b>');
+    line1.push('剧级明细采集日 <b>' + esc(fs.jie_zhi || '—') + '</b>');
+    if ((fs.sandra || {}).zhua_qu_shi_jian) {
+      line1.push('Sandra 抓取 <b>' + esc(String(fs.sandra.zhua_qu_shi_jian).slice(0, 16)) + '</b>');
+    }
   } else {
     /* 不再显示「在榜 N 本」—— 子标签上已经带了同一个数字，重复 */
     /* ⭐ 榜单日随改编快照切换：每期各配「<= 该快照日的最近榜单日」
@@ -700,8 +712,15 @@ function tableHtml(cfg) {
   var h = '<div class="toolbar">';
   h += '<input id="q_' + cfg.key + '" placeholder="搜索' + esc(cfg.searchHint || '书名 / 作者') +
        '" value="' + esc(st.q) + '">';
+  /* 口径筛选（月份 / 第二筛选 / 数值阈值）先拼成一段 kj。
+     cfg.chaiGongJuLan = true 时（2026-11-16 爆款题材页，用户选方案 A）这段**不进**表格工具栏，
+     而是放进 cfg.kouJingLanHtml，由页面自己摆到汇总卡和图表上方 —— 因为这三个筛选器
+     对整页（卡片 + 两张图 + 表格）生效，搜索 / 排序只对表格生效，混在一行会被读成都管图。
+     ⚠ 元素 id 不变（f_ / f2_ / f3_），bindTable 照常按 id 绑，局部刷新照常不重建它们。
+     其余页面不传这个开关 ⇒ kj 原样插回搜索框之后，工具栏结构与以前逐字节一致。 */
+  var kj = '';
   if (cfg.filters && cfg.filters.length) {
-    h += '<select id="f_' + cfg.key + '">' + cfg.filters.map(function (o) {
+    kj += '<select id="f_' + cfg.key + '">' + cfg.filters.map(function (o) {
       return '<option value="' + esc(o.v) + '"' + (st.filter === o.v ? ' selected' : '') + '>' +
              esc(o.label) + '</option>';
     }).join('') + '</select>';
@@ -712,7 +731,7 @@ function tableHtml(cfg) {
        不兜底会拼出 selected 判断失效（下拉显示第一项但数据仍是上次筛选的）。 */
   if (cfg.filters2 && cfg.filters2.length) {
     var st2 = st.filter2 || '';
-    h += '<select id="f2_' + cfg.key + '">' + cfg.filters2.map(function (o) {
+    kj += '<select id="f2_' + cfg.key + '">' + cfg.filters2.map(function (o) {
       return '<option value="' + esc(o.v) + '"' + (st2 === o.v ? ' selected' : '') + '>' +
              esc(o.label) + '</option>';
     }).join('') + '</select>';
@@ -723,9 +742,14 @@ function tableHtml(cfg) {
      ⚠ 用 type="number" + inputmode：手机上弹数字键盘。 */
   if (cfg.numFilter) {
     var st3 = st[cfg.numFilter.k];
-    h += '<span class="nf"><label for="f3_' + cfg.key + '">' + esc(cfg.numFilter.label) +
+    kj += '<span class="nf"><label for="f3_' + cfg.key + '">' + esc(cfg.numFilter.label) +
          '</label><input type="number" min="0" step="1" inputmode="numeric" id="f3_' + cfg.key +
          '" value="' + (st3 == null || st3 === '' ? '' : esc(String(st3))) + '"></span>';
+  }
+  if (cfg.chaiGongJuLan) {
+    cfg.kouJingLanHtml = kj ? '<div class="toolbar toolbar-kj" id="kj_' + cfg.key + '">' + kj + '</div>' : '';
+  } else {
+    h += kj;
   }
   /* 排序下拉：给「常用排序维度」一个显式入口。表头点击排序依然可用，
      两者共享 st.sort/st.dir；表头排到预设之外时下拉落到 __custom 占位项。
@@ -1858,7 +1882,7 @@ function renderFanqieBaokuan(page, snap) {
   var yueBiao = s.yue_biao || [{ v: '', label: '全部月份' }];
   var kid = page.key + '@' + (snap.date || '');
   var MINJU = s.min_ju || 50;
-  var TOPNJ = s.top_n_ju || 20;
+  var TOPNJ = s.top_n_ju || 10;
 
   function ming(i) { return cats[i] || '（题材缺失）'; }
   function yueTxt(ym) {
@@ -1893,6 +1917,7 @@ function renderFanqieBaokuan(page, snap) {
     var ym = (st && st.filter) || '';
     a.push(ym ? yueTxt(ym) : '全部月份');
     a.push(xingTxt(st));
+    if (st && st.minju) a.push('部数 ≥ ' + st.minju);
     return a.join(' / ');
   }
   function xingTxt(st) {
@@ -1901,12 +1926,37 @@ function renderFanqieBaokuan(page, snap) {
     return '全部剧类型';
   }
 
+  /* 「改编剧数 ≥ X」筛选后的当前视图行（紧凑数组形态，r[1] = 当前剧类型 × 月份下的部数）。
+     ⚠ 只作用于当前视图：表格 / 两张柱图 / 「参与排行的改编剧」卡。
+       题材池是累计口径，⛔ 不受它影响（否则「池子」的含义随手输数字变）。 */
+  function guoLv(st, lie) {
+    var mj = (st && st.minju) || 0;
+    if (!mj) return lie;
+    return lie.filter(function (r) { return r[1] >= mj; });
+  }
+  /* 柱图在「部数 ≥ X」下的重排。⛔ 排序键必须与 ETL 逐字一致：
+     指标降序 → 部数降序 → 题材名（**码位序**，与 Python 字符串比较一致；
+     ⛔ 不许用 localeCompare，那是拼音序，并列时会和 ETL 排出不同结果）。
+     没填阈值时**直接用 ETL 排好的 quan / tou**，不经过这里。 */
+  function chongPai(lie, zhiBiao) {
+    return lie.slice().sort(function (a, b) {
+      if (b[zhiBiao] !== a[zhiBiao]) return b[zhiBiao] - a[zhiBiao];
+      if (b[1] !== a[1]) return b[1] - a[1];
+      var x = ming(a[0]), y = ming(b[0]);
+      return x < y ? -1 : (x > y ? 1 : 0);
+    }).slice(0, s.top_n_tu || 10);
+  }
+
   /* 汇总卡 + 两张柱图。合在一个函数里是因为三者都随筛选变，
      而 refreshStats 只能重写一个容器（st_）—— 拆开会有一半不刷新。 */
   function kaPian(st) {
     var x = xingOf(st), z = zuOf(st);
+    var mj = (st && st.minju) || 0;
+    var allF = guoLv(st, z.all);
+    var quan = mj ? chongPai(allF, 2) : z.quan;
+    var tou = mj ? chongPai(allF, 4) : z.tou;
     var bu = 0;
-    z.all.forEach(function (r) { bu += r[1]; });
+    allF.forEach(function (r) { bu += r[1]; });
 
     var h2 = '<div class="stats stats-3">';
     h2 += statCard('题材池', num(x.pool) + ' 个',
@@ -1930,21 +1980,26 @@ function renderFanqieBaokuan(page, snap) {
     h2 += statCardDuo('真人短剧', num(zrN), 'AI 漫剧', num(aiN));
     h2 += '</div>';
 
-    /* 两张柱图各自排序、各自取前 N —— 数据来自 ETL，前端不重排。 */
+    /* 两张柱图各自排序、各自取前 N —— 未填部数阈值时数据直接来自 ETL，前端不重排；
+       填了阈值时由 chongPai() 用与 ETL 逐字一致的排序键重排（见其注释）。 */
+    /* 入池门槛写进两张图的副标题（用户 2026-11-16 要求「在网页前端标注」）。
+       ⚠ 门槛数字读 ETL 的 min_ju，⛔ 不写死 50；「全库累计、不是单月」要说清，
+         否则选了某个月会被读成「该月 ≥ 50 部才进图」。 */
+    var menKan = '入池门槛：当前剧类型下全库累计 ≥ ' + MINJU + ' 部（非单月，切月份不改变题材池）';
     var ka = [];
-    if (z.quan.length) {
+    if (quan.length) {
       ka.push(cardHtml('剧级题材热度 · 整体水位',
         '该题材全部已改编剧的平均最高热度；题材池 ' + num(x.pool) + ' 个中按该指标取前 ' +
-        z.quan.length + '｜' + shaiTxt(st),
-        miniColsDanHtml(z.quan.map(function (r) {
+        quan.length + '｜' + menKan + '｜' + shaiTxt(st),
+        miniColsDanHtml(quan.map(function (r) {
           return { k: ming(r[0]), v: r[2], t: wan(r[2]) + '（' + num(r[1]) + ' 部）' };
         }), 'var(--fanqie)', '纵轴为该题材全部已改编剧的平均最高热度')));
     }
-    if (z.tou.length) {
+    if (tou.length) {
       ka.push(cardHtml('剧级题材热度 · 上限',
-        '该题材热度最高的前 ' + TOPNJ + ' 部剧的平均热度；同样题材池、同样门槛，' +
-        '按该指标取前 ' + z.tou.length + ' —— 与左图不是同一批题材｜' + shaiTxt(st),
-        miniColsDanHtml(z.tou.map(function (r) {
+        '该题材热度最高的前 ' + TOPNJ + ' 部剧的平均热度（不足 ' + TOPNJ + ' 部按实际部数）；' +
+        '按该指标取前 ' + tou.length + ' —— 与左图不是同一批题材｜' + menKan + '｜' + shaiTxt(st),
+        miniColsDanHtml(tou.map(function (r) {
           return { k: ming(r[0]), v: r[4],
                    t: wan(r[4]) + '（取前 ' + r[3] + ' 部，该题材共 ' + num(r[1]) + ' 部）' };
         }), '#7C2D12', '纵轴为该题材热度前 ' + TOPNJ + ' 部剧的平均最高热度')));
@@ -1970,7 +2025,9 @@ function renderFanqieBaokuan(page, snap) {
     var out = zuOf(st).all.map(function (r) {
       var g = (r[5] == null ? null : r[5]);
       return {
-        cat: ming(r[0]), ju: r[1], jun: r[2], tn: r[3], tou: r[4],
+        ci: r[0], cat: ming(r[0]), ju: r[1], jun: r[2], tn: r[3], tou: r[4],
+        /* 该组合下热度 Top N 剧的下标（指向 stats.ju）。老产物没有第 7 项 ⇒ 空数组。 */
+        top: r[6] || [],
         gap: g,
         /* 排序专用字段（列头 data-sort 指向它，显示仍用 gap）。
            ⚠ 为什么不让排序直接吃 gap：`filterSortRows` 把 null 当 0
@@ -1983,6 +2040,62 @@ function renderFanqieBaokuan(page, snap) {
     });
     _hc[k] = out;
     return out;
+  }
+  /* 表格的数据源 = 当前组合的全部行，再过「改编剧数 ≥ X」。
+     ⚠ 阈值比较的是当前剧类型 × 月份下的部数（行对象的 ju），与柱图 / 汇总卡同一口径。 */
+  function hangOf(st) {
+    var lie = naHang(st), mj = (st && st.minju) || 0;
+    return mj ? lie.filter(function (r) { return r.ju >= mj; }) : lie;
+  }
+
+  /* ---------- 展开面板：题材热度 Top N 剧（用户 2026-11-13 加） ----------
+     名单由 ETL 按「剧类型 × 月份 × 题材」预算好，前端只查表 ⇒ 天然跟着两个筛选器走。
+     选了具体月份且有 GAP 列时，左右并排「本月 / 上月」—— 用户的目的是看清
+     「这个月均热为什么涨 / 跌」，只看本月一栏回答不了，必须有上月对照。 */
+  var JU = s.ju || [];
+  var MXN = s.mingxi_n || 10;
+  function juBiao(idx) {
+    if (!idx.length) return '<div class="kv dim">没有上线剧</div>';
+    var dg = '22px minmax(0,1fr) 46px 86px 80px';
+    var x = '<div class="dtr dhead" style="grid-template-columns:' + dg + '">' +
+            '<div>#</div><div>剧名</div><div>类型</div><div>上线日</div>' +
+            '<div class="cell num">最高热度</div></div>';
+    idx.forEach(function (j, i) {
+      var d = JU[j] || ['（缺失）', 2, 0, '', 0];
+      var lx = d[1] === 1 ? '<span class="tag t-AI">AI</span>'
+             : (d[1] === 0 ? '<span class="tag t-真人">真人</span>' : '<span class="dim">—</span>');
+      x += '<div class="dtr" style="grid-template-columns:' + dg + '">' +
+           '<div class="dim">' + (i + 1) + '</div>' +
+           '<div class="cell" title="' + esc(d[0]) + '">' + esc(d[0]) + '</div>' +
+           '<div>' + lx + '</div>' +
+           '<div class="cell dim">' + (d[3] ? esc(d[3]) : '—') + '</div>' +
+           '<div class="cell num' + (d[4] ? ' hot' : ' dim') + '">' +
+             (d[4] ? reduTxt(d[4]) : '—') + '</div></div>';
+    });
+    return x;
+  }
+  /* 一栏的标题：「2026-10 上线 · 热度前 10 部｜该题材共 274 部｜前 20 部均热 5,852 万」 */
+  function lanTou(ymTxt, hang) {
+    if (!hang) return '<div class="dp-title">' + esc(ymTxt) + ' · 该题材没有上线剧</div>';
+    var n = (hang[6] || hang.top || []).length;
+    var ju = hang[1] != null ? hang[1] : hang.ju;
+    var tou = hang[4] != null ? hang[4] : hang.tou;
+    return '<div class="dp-title">' + esc(ymTxt) + ' · 热度前 ' + n + ' 部' +
+           '｜该题材共 ' + num(ju) + ' 部｜前 ' + TOPNJ + ' 部均热 ' + wan(tou) + '</div>';
+  }
+  function mingXi(r, st) {
+    var ym = (st && st.filter) || '';
+    var benTxt = ym ? (ym === '未知' ? '无上线时间' : ym + ' 上线') : '全部月份';
+    var ben = '<div>' + lanTou(benTxt, r) + juBiao(r.top) + '</div>';
+    var shang = gapShangTxt(st);
+    if (!gapYueOf(st)) return ben;
+    /* 上月同一题材的那一行：在「同剧类型 × 上月」那套榜里按题材下标找。
+       ⛔ 不按题材名找 —— 下标是全局字典里唯一的，名字匹配会被空格 / 全半角坑。 */
+    var zs = ((xingOf(st).yue || {})[shang] || { all: [] }).all;
+    var hs = null;
+    for (var i = 0; i < zs.length; i++) if (zs[i][0] === r.ci) { hs = zs[i]; break; }
+    var sh = '<div>' + lanTou(shang + ' 上线', hs) + (hs ? juBiao(hs[6] || []) : '') + '</div>';
+    return '<div class="bk-mx2">' + ben + sh + '</div>';
   }
 
   /* GAP 单元格：正红负绿（中国习惯），null 显示「—」。
@@ -2052,8 +2165,14 @@ function renderFanqieBaokuan(page, snap) {
     /* ⚠ cfg.rows 只给 tableHtml 判「要不要显示每页条数下拉」；
        真正的数据来自 rowsFn。⛔ 别让 filterSortRows 直接吃 snap.rows（它是空的）。 */
     rows: snap.rows || [],
-    rowsFn: naHang,
+    rowsFn: hangOf,
     statsFn: kaPian,
+    /* 点题材展开热度 Top N 剧（用户 2026-11-13 要求，与 CP 专区的展开面板同款）。
+       ⚠ 必须现读 VIEW[kid]：筛选器变了以后展开面板要跟着换名单。 */
+    detail: function (r) { return mingXi(r, VIEW[kid]); },
+    /* 部数阈值：手输，≥ 判定（与 CP 专区同一个引擎控件）。用户 2026-11-13 要求加，
+       用来过滤单月只有一两部的题材（那种题材的均热就是一两部剧的热度）。 */
+    numFilter: { k: 'minju', label: '改编剧数 ≥' },
     defaultSort: { k: 'ju', dir: 'desc' },
     /* 函数形式：GAP 项只在筛了具体月份时出现（见 sortOptsOf / colsOf 的注释）。
        引擎在 refreshTable 里按选项签名重建下拉，⛔ 前端不必自己重画工具栏。 */
@@ -2068,14 +2187,18 @@ function renderFanqieBaokuan(page, snap) {
       { v: 'real', label: '只看真人短剧' },
       { v: 'ai', label: '只看 AI 漫剧' }
     ],
-    cols: colsOf
+    cols: colsOf,
+    /* 工具栏拆两段（用户 2026-11-16 方案 A）：月份 / 剧类型 / 改编剧数 ≥ 对整页生效，
+       放到汇总卡和两张图上方；搜索 / 排序只管表格，留在表格上方。 */
+    chaiGongJuLan: true
   };
 
-  /* ⚠ 必须先跑 tableHtml —— 它会建好 VIEW[cfg.key]（含默认排序），
+  /* ⚠ 必须先跑 tableHtml —— 它会建好 VIEW[cfg.key]（含默认排序）并产出 cfg.kouJingLanHtml，
      后面的汇总卡和图要读这份 st。顺序反了会读到 undefined。 */
   var biao = tableHtml(cfg);
 
   var h = notesHtml(page);
+  h += cfg.kouJingLanHtml || '';
   h += '<div id="st_' + kid + '">' + kaPian(VIEW[kid]) + '</div>';
   h += biao;
   /* 页底脚注：用户明确要求「与书级题材改编热度逐条区分」要写在专区下方。
@@ -2087,6 +2210,150 @@ function renderFanqieBaokuan(page, snap) {
      + '③ 维度不同 —— 书级没有月份维度；本页可按上线月份切，切月份只换参与计算的剧，'
      + '题材池（累计口径）不变，所以某月可能有个别题材当月一部都没有、不参与当月排名。'
      + '热度一律用红果「最高热度」（历史峰值，非最新值）。</div>';
+  return { html: h, bind: function () { bindTable(cfg); } };
+}
+
+/* ---------------- 页面：番茄 · 头部非独家爆款（2026-11-15 新增） ----------------
+   数据 = Sandra 站「红果漫剧每日 top30」× 网文大数据剧级明细（剧名匹配，ETL 已全部算好）。
+   前端只做两件事：按日期取当天那 30 行；按「是否平台独家」筛。
+   ⛔ 匹配不许挪到前端：四档匹配规则只有 ETL 一处（_build_fanqie_feidujia_one），
+      前端再写一份就是两套口径。
+   紧凑数据结构（见 ETL 注释）：
+     stats.ju[i]  = [Sandra 剧名, 匹配码, 原著小说, 上线时间, 版权方(采集日), 出品方(Sandra), 命中的剧级表剧名]
+     stats.ri[日] = [[排名, 剧下标, 热度, 标签, 集数], ...]                                        */
+function renderFanqieFeidujia(page, snap) {
+  var s = snap.stats || {};
+  var JU = s.ju || [];
+  var RI = s.ri || {};
+  var riLie = s.ri_lie || [];
+  var zuiXin = riLie[0] || '';
+  var piPeiMing = s.pi_pei_ming || [];
+  var DU = s.du || '独家概率高';
+  var FEI = s.fei || '非独家概率高，内容团队可尝试建联';
+  var kid = page.key + '@' + (snap.date || '');
+
+  /* 日期下拉：第一项 v='' 就是最新一天（tableHtml 的默认 filter 恒为 ''）。
+     ⛔ 不许把最新一天再列一次 —— 同一个日期出现两次会被读成两份数据。 */
+  var riXuan = riLie.map(function (d, i) {
+    return { v: i === 0 ? '' : d, label: d + (i === 0 ? '（最新）' : '') };
+  });
+  function riOf(st) { return (st && st.filter) || zuiXin; }
+
+  /* 当天 30 行 → 行对象。按日期缓存：翻页 / 搜索不必重解。 */
+  var _hc = {};
+  function naHang(st) {
+    var d = riOf(st);
+    if (_hc[d]) return _hc[d];
+    var out = (RI[d] || []).map(function (r) {
+      var j = JU[r[1]] || ['（缺失）', 0, '', '', '', '', '', 0];
+      return {
+        pm: r[0], name: j[0], re: r[2], tags: r[3], ji: r[4],
+        ma: j[1], yz: j[2], sx: j[3], bq: j[4], cp: j[5], dy: j[6],
+        /* 剧名近似档里季数对不上 ⇒ ETL 已把上线时间清空（用户 2026-11-15 方案 A）。 */
+        jibu: j[7] ? 1 : 0,
+        du: j[1] > 0 ? 1 : 0
+      };
+    });
+    _hc[d] = out;
+    return out;
+  }
+
+  /* 空值统一显示「—」，鼠标停留说明原因（用户 2026-11-15：空着，并说明是上游没披露）。
+     ⛔ 原因要分清：没匹配上的剧本来就没有这些字段，和「匹配上了但网文大数据没披露」是两回事。 */
+  function kong(v, r, ziDuan) {
+    if (v) return esc(v);
+    /* ⚠ 出品方来自 Sandra，与是否匹配上无关 ⇒ 必须最先判，否则没匹配上的剧会被说成「未匹配所以没有出品方」。 */
+    var why = ziDuan === 'cp' ? 'Sandra 未记录出品方（或只有「待确认」这类占位值）'
+            : !r.ma ? '未匹配到番茄改编库，无此信息'
+            : ziDuan === 'sx' && r.ma === 3 ? '按同系列前作匹配：这一季本身不在剧级明细里'
+            : ziDuan === 'sx' && r.jibu ? '按剧名近似匹配到的是另一季（季数不一致），不取它的上线时间'
+            : '网文大数据未披露';
+    return '<span class="dim" title="' + esc(why) + '">—</span>';
+  }
+
+  function kaPian(st) {
+    var lie = naHang(st);
+    var du = 0;
+    lie.forEach(function (r) { du += r.du; });
+    var fei = lie.length - du;
+    var d = riOf(st);
+    var h2 = '<div class="stats stats-3">';
+    h2 += statCard('独家概率高', num(du) + ' <small>/ ' + num(lie.length) + ' 部</small>',
+                   esc(d) + ' 当日 Top' + lie.length + ' 中能匹配到番茄小说原著改编的剧');
+    h2 += statCard('非独家概率高', num(fei) + ' <small>/ ' + num(lie.length) + ' 部</small>',
+                   esc(d) + ' 当日匹配不到番茄改编库，内容团队可尝试建联');
+    h2 += statCard('区间内上过榜的非独家剧', num(s.fei_zong || 0) + ' <small>部</small>',
+                   esc((s.ri_qi || '—') + ' 至 ' + (s.jie_zhi || '—')) + ' 共 ' + num(riLie.length) +
+                   ' 天，按剧名去重；不随日期筛选变');
+    h2 += '</div>';
+    return h2;
+  }
+
+  var cfg = {
+    key: kid,
+    rows: [],
+    rowsFn: naHang,
+    statsFn: kaPian,
+    defaultSort: { k: 'pm', dir: 'asc' },
+    sortOptions: [
+      { k: 'pm', dir: 'asc', label: '按榜单排名' },
+      { k: 're', dir: 'desc', label: '按热度' }
+    ],
+    searchKeys: ['name', 'yz', 'cp', 'bq'],
+    searchHint: '剧名 / 原著 / 出品方 / 版权方',
+    rowId: function (r) { return r.name; },
+    filters: riXuan,
+    filters2: [
+      { v: '', label: '全部（独家 + 非独家）' },
+      { v: 'du', label: '只看' + DU },
+      { v: 'fei', label: '只看非独家概率高' }
+    ],
+    filterFn2: function (r, v) { return v === 'du' ? r.du === 1 : (v === 'fei' ? r.du === 0 : true); },
+    cols: [
+      { k: 'pm', label: '#', w: '46px', type: 'num',
+        render: function (r) { return '<span class="rankno">' + r.pm + '</span>'; } },
+      { k: 'name', label: '剧名', w: 'minmax(0,1.5fr)', type: 'text', cls: 'name' },
+      { k: 're', label: '热度', w: '84px', type: 'num', cls: 'hot',
+        render: function (r) { return r.re ? reduTxt(r.re) : '<span class="dim">—</span>'; } },
+      { k: 'tags', label: '标签', w: 'minmax(0,1.1fr)', type: 'text', dim: true,
+        render: function (r) { return r.tags ? esc(r.tags) : '<span class="dim">—</span>'; } },
+      { k: 'ji', label: '集数', w: '56px', type: 'num',
+        render: function (r) { return r.ji ? num(r.ji) : '<span class="dim">—</span>'; } },
+      { k: 'sx', label: '上线时间', w: '92px', type: 'text',
+        render: function (r) { return kong(r.sx, r, 'sx'); } },
+      { k: 'yz', label: '原著小说', w: 'minmax(0,1.4fr)', type: 'text',
+        render: function (r) { return kong(r.yz, r, 'yz'); } },
+      { k: 'bq', label: '版权方(采集日)', w: 'minmax(0,1.1fr)', type: 'text',
+        render: function (r) { return kong(r.bq, r, 'bq'); } },
+      { k: 'cp', label: '出品方(Sandra)', w: 'minmax(0,1fr)', type: 'text',
+        render: function (r) { return kong(r.cp, r, 'cp'); } },
+      /* 「匹配依据」不单独成列（用户 2026-11-15：放进 ⓘ 说明），只挂在本格的鼠标悬停里。 */
+      { k: 'du', label: '是否平台独家', w: 'minmax(150px,1.3fr)', type: 'num',
+        cls: 'fdj-pan',
+        title: function (r) {
+          return r.ma ? '匹配依据：' + (piPeiMing[r.ma] || '') +
+                        (r.dy && r.dy !== r.name ? '（剧级明细里叫「' + r.dy + '」）' : '')
+                      : '匹配依据：四档都没匹配上';
+        },
+        render: function (r) {
+          return r.du ? '<span class="fdj-du">' + esc(DU) + '</span>'
+                      : '<span class="fdj-fei">' + esc(FEI) + '</span>';
+        } }
+    ]
+  };
+
+  var biao = tableHtml(cfg);
+  var h = notesHtml(page);
+  if (!riLie.length) {
+    return { html: h + '<div class="card"><div class="card-bd dim">本期没有可用的榜单日' +
+                   '（Sandra 快照里没有早于剧级明细采集日的数据）。</div></div>', bind: function () {} };
+  }
+  h += '<div id="st_' + kid + '">' + kaPian(VIEW[kid]) + '</div>';
+  h += biao;
+  h += '<div class="footnote">榜单只收录到 ' + esc(s.jie_zhi || '—') +
+       '（网文大数据剧级明细的采集日）：之后才上榜的剧，改编库还没有收录，无法判定，所以不收。' +
+       '「独家 / 非独家」是按剧名能否在番茄改编库里匹配到做的概率判断，建联前请人工确认；' +
+       '匹配规则与各字段口径见上方 ⓘ。</div>';
   return { html: h, bind: function () { bindTable(cfg); } };
 }
 
@@ -2963,6 +3230,7 @@ function renderPage(keepScroll) {
     else if (key === 'fanqie_wwds') out = renderWwds(page, snap);
     else if (key === 'fanqie_copyright') out = renderFanqieCopyright(page, snap);
     else if (key === 'fanqie_baokuan') out = renderFanqieBaokuan(page, snap);
+    else if (key === 'fanqie_feidujia') out = renderFanqieFeidujia(page, snap);
     else out = renderCopyrightBoard(page, snap);
     main.innerHTML = out.html;
     out.bind();
