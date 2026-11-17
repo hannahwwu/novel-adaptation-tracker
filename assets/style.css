@@ -548,6 +548,12 @@ a { color: inherit; text-decoration: none; }
 .ka-quxian { display: flex; flex-direction: column; }
 .ka-quxian .card-bd { flex: 1; display: flex; flex-direction: column; }
 .ka-quxian .linechart { margin-top: auto; }
+/* 题材改编热度两张柱图（番茄改编全库页，2026-11-17 用户反馈「两张图看着不左右对齐」）：
+   副标题改成书级口径长文后，左卡表头 4 行、右卡 2 行 ⇒ 同样的问题，同样的修法（柱图也是 SVG，
+   class 同为 linechart）：三层 flex 链让「SVG + 图例 + 纵轴说明」贴卡片底部。⛔ 不写死任何高度。 */
+.ka-ticai { display: flex; flex-direction: column; }
+.ka-ticai .card-bd { flex: 1; display: flex; flex-direction: column; }
+.ka-ticai .linechart { margin-top: auto; }
 
 /* 柱状图卡（阈值图 / 题材效率图）。
    用户 2026-09-07 反馈「题材改编效率图高度偏窄、下面很空」：

@@ -1361,26 +1361,32 @@ function renderWwds(page, snap) {
     if (ch.books && s.totals && s.totals.books) {
       fenMu += '，覆盖全库 ' + (ch.books / s.totals.books * 100).toFixed(1) + '% 的书';
     }
-    var chMin = ch.min_books || 150;
+    /* 入池门槛（2026-11-17 用户定，与「爆款题材」页拉齐）：全库累计改编剧 ≥ min_ju 部。
+       ⚠ 数字读 ETL 的 ch.min_ju，⛔ 不写死；原「仅统计样本 150 本以上」已删。
+       副标题措辞由用户 2026-11-17 确认：先讲「书级」怎么算，再讲门槛，最后提示与剧级页不可横比。 */
+    var chMin = ch.min_ju || 50;
     wwdsCharts.push(cardHtml('题材改编热度 · 整体水位',
-      '该题材全部已改编书的平均最高热度；仅统计样本 ' + chMin + ' 本以上的题材，' +
-      fenMu + '，按该指标取前 ' + chQuan.length,
+      '书级口径：每本已改编的书只取它热度最高的那一部剧，一本书算一次；' +
+      '纵轴是这些书的平均红果最高热度（历史峰值）。入池门槛：该题材全库累计改编剧 ≥ ' + chMin + ' 部；' +
+      fenMu + '，按该指标取前 ' + chQuan.length +
+      '。与「爆款题材」页的剧级口径不同（那边每一部剧都算一次），两页数字不能横比',
       miniColsDanHtml(chQuan.map(function (r) {
         return { k: r.category, v: r.quan_jun,
                  t: wan(r.quan_jun) + '（全量 ' + num(r.books) + ' 本）' };
-      }), 'var(--fanqie)', '纵轴为该题材全部已改编书的平均最高热度')));
+      }), 'var(--fanqie)', '纵轴为该题材全部已改编书的平均最高热度'), 'ka-ticai'));
     /* ⛔ 2026-10-26 改名：原来叫「天花板」，而同一页右上那张月度趋势叫
        「改编剧热度天花板月度趋势」（每月 top10 峰值均热）—— 同页两个「天花板」
        一个是「题材前 20 本均热」、一个是「每月 top10 峰值均热」，撞词不同义。
        用户定案：这张改叫「上限」，「天花板」只留给月度趋势那张，且两处口径都要写清。 */
     wwdsCharts.push(cardHtml('题材改编热度 · 上限',
-      '该题材热度最高的前 ' + chTopN + ' 本的平均热度；同样的题材池、同样的门槛，' +
+      '书级口径：每本书取它热度最高的一部剧，再取该题材前 ' + chTopN + ' 本的均值' +
+      '（不足 ' + chTopN + ' 本按实际本数）；同样的题材池、同样的门槛，' +
       '按该指标取前 ' + chTou.length + ' —— 与左图不是同一批题材',
       miniColsDanHtml(chTou.map(function (r) {
         return { k: r.category, v: r.tou_jun,
                  t: wan(r.tou_jun) + '（取前 ' + r.top_n_shi + ' 本，该题材共 ' +
                     num(r.books) + ' 本）' };
-      }), '#7C2D12', '纵轴为该题材热度前 ' + chTopN + ' 本的平均最高热度')));
+      }), '#7C2D12', '纵轴为该题材热度前 ' + chTopN + ' 本的平均最高热度'), 'ka-ticai'));
   }
 
   /* 两张都在才并列；只剩一张时并列会被 auto-fit 拉成半宽显得残缺，直接整宽输出。
@@ -2198,6 +2204,9 @@ function renderFanqieBaokuan(page, snap) {
   var biao = tableHtml(cfg);
 
   var h = notesHtml(page);
+  /* 爆款题材洞察（2026-11-17）：放在整页筛选栏**之前** —— 它固定看「最近一个完整月 × 全部剧类型」，
+     不随下面的筛选器变，放进筛选区下方会被读成跟着筛选走。判定规则全文写在洞察正文里（用户要求写详细）。 */
+  h += insightsHtml(snap.insights);
   h += cfg.kouJingLanHtml || '';
   h += '<div id="st_' + kid + '">' + kaPian(VIEW[kid]) + '</div>';
   h += biao;
@@ -2206,10 +2215,11 @@ function renderFanqieBaokuan(page, snap) {
   h += '<div class="footnote">与「番茄改编全库」页的「题材改编热度」逐条对应，别横着比：'
      + '① 单位不同 —— 那两张是「书级」，一本书有多个改编时只取热度最高的那一部，一本书算一次；'
      + '本页是「剧级」，每一部改编剧各算一次。'
-     + '② 门槛不同 —— 书级按书数（≥150 本），本页按剧数（累计 ≥' + MINJU + ' 部）。'
+     + '② 门槛相同、单位不同 —— 两页题材池都是「全库累计改编剧 ≥' + MINJU + ' 部」，逐个相同；'
+     + '但书级图每个题材的样本是书，本页是剧。'
      + '③ 维度不同 —— 书级没有月份维度；本页可按上线月份切，切月份只换参与计算的剧，'
      + '题材池（累计口径）不变，所以某月可能有个别题材当月一部都没有、不参与当月排名。'
-     + '热度一律用红果「最高热度」（历史峰值，非最新值）。</div>';
+     + '热度一律用红果「最高热度」（跨期合并后的历史峰值，非最新值）。</div>';
   return { html: h, bind: function () { bindTable(cfg); } };
 }
 
@@ -3003,7 +3013,8 @@ function reduFencengHtml(rf) {
   /* 脚注：口径 + 保底声明。少了这两句，上面那张图就是在误导。 */
   var dang = (rf.dang || []).map(function (v) { return wan(v); });
   var foot = '按改编作品上线月份统计当月新上线的作品部数；' +
-    '热度取红果历史最高热度（非当月值，最近上线的作品峰值可能尚未爬到顶）。' +
+    '热度取红果历史最高热度（非当月值，最近上线的作品峰值可能尚未爬到顶）；' +
+    '该字段上游曾两次重置，本站按短剧ID取历次采集的最大值（跨期合并）。' +
     '三档切点为业务口径：' + (dang[0] ? '<' + dang[0] : '') +
     (dang[1] ? ' / ' + dang[0] + '-' + dang[1] + ' / ≥' + dang[1] : '') + '。' +
     'AI 与真人共用同一纵轴，柱高严格等于当月部数。';
@@ -3031,10 +3042,14 @@ function gailanTopZengHtml(list) {
     return '<div class="g-xz-none">本期两个番茄榜单的 Top10 内，没有作品的短剧+漫剧部数增加。</div>';
   }
   var h = '<div class="g-xz-list">' + list.map(function (x) {
+    /* 2026-11-17：同一本书同时进两个榜 Top10 时，ETL 已合并成一行（bang_lie 两项），逐榜写排名。
+       老产物没有 bang_lie ⇒ 退回单榜。 */
+    var bl = x.bang_lie || [{ bang: x.bang, rank: x.rank }];
+    var bangTxt = bl.map(function (b) { return b.bang + ' #' + b.rank; }).join(' · ');
     return '<div class="g-xz-item">' +
       '<div><span class="rankno">' + x.rank + '</span></div>' +
-      '<div class="cell name" title="' + esc(x.name) + '">' + esc(x.name) +
-      ' <span class="cell dim" style="font-weight:400">· ' + esc(x.bang) + '</span></div>' +
+      '<div class="cell name" title="' + esc(x.name + ' · ' + bangTxt) + '">' + esc(x.name) +
+      ' <span class="cell dim" style="font-weight:400">· ' + esc(bl.length > 1 ? bangTxt : x.bang) + '</span></div>' +
       '<div class="bs">' + x.before + ' → ' + x.after + ' 部 (+' + x.delta + ')</div>' +
       '</div>';
   }).join('') + '</div>';
@@ -3042,7 +3057,8 @@ function gailanTopZengHtml(list) {
   h += '<div class="g10-foot">' + esc(
     '「部数」= 番茄 App 改编板块内已上线的短剧+漫剧部数。' +
     '对比基准为各榜自己的上一期（' + (qj.shang_qi_ri || '—') + ' → ' +
-    (qj.ben_qi_ri || '—') + '），只统计两期都在榜的书。') + '</div>';
+    (qj.ben_qi_ri || '—') + '），只统计两期都在榜的书；' +
+    '同一本书同时进两个榜单 Top10 时合并为一行。') + '</div>';
   return h;
 }
 
