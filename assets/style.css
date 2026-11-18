@@ -319,7 +319,7 @@ a { color: inherit; text-decoration: none; }
   content: ''; width: 5px; height: 5px; border-radius: 50%;
   background: var(--accent); flex-shrink: 0;
 }
-.insight .x { font-size: 12.5px; line-height: 1.65; color: var(--ink-2); }
+.insight .x { font-size: 12.5px; line-height: 1.65; color: var(--ink-2); white-space: pre-line; }  /* 2026-11-18: 爆款洞察按模板分行 */
 
 .empty-box {
   background: var(--bg-soft); border: 1px dashed var(--line-strong);
